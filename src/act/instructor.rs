@@ -69,8 +69,7 @@ pub enum InstructorAct
     #[structopt(about = "[instructors only] checks all assignment specifications for validity")]
     AuditAll{},
     
-    #[structopt(about = "[instructors only] attempts to fix the state of the submission directory. \
-    Does not remove or rewrite files.")]
+    #[structopt(about = "[instructors only] attempts to fix the state of the course directory")]
     Refresh{},
 
 }
@@ -102,10 +101,7 @@ impl InstructorAct
         Ok(())
     }
 
-    fn refresh(context: &Context) -> Result<(),FailLog>
-    {
-        context.refresh()
-    }
+
 
     pub fn execute(&self, context: &Context) -> Result<(),FailLog>
     {
@@ -114,7 +110,7 @@ impl InstructorAct
             Grader(act)            => act.execute(context),
             Audit    { asgn_name } => Self::audit(asgn_name.clone(),context),
             AuditAll {}            => Self::audit_all(context),
-            Refresh  {}            => Self::refresh(context),
+            Refresh  {}            => context.refresh(),
         }
     }
 

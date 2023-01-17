@@ -2,6 +2,7 @@ use structopt::StructOpt;
 
 use std::
 {
+    os::unix::ffi::OsStringExt,
     ffi::OsString,
     fs,
 };
@@ -15,6 +16,7 @@ use crate::
         FailInfo,
         FailLog,
     },
+    util,
 };
 
 
@@ -65,19 +67,20 @@ pub enum StudentAct
 impl StudentAct
 {
 
+
     fn submit(asgn_name: &OsString, context: &Context) -> Result<(),FailLog>
     {
         let spec : &AsgnSpec = context.catalog.get(asgn_name)
             .ok_or(FailInfo::InvalidAsgn(asgn_name.clone()).into_log())?
             .as_ref().map_err(|err| err.clone() )?;
         
-        let sub_path = context.base_path.join(asgn_name).join(&context.user);
+        let sub_dir = context.base_path.join(asgn_name).join(&context.user);
 
         let src_dir = context.cwd.clone();
         let mut log : FailLog = Default::default();
         for file_name in spec.file_list.iter() {
-            let src_path = src_dir .join(file_name);
-            let dst_path = sub_path.join(file_name);
+            let src_path = src_dir.join(file_name);
+            let dst_path = sub_dir.join(file_name);
             if ! src_path.exists() {
                 log.push(FailInfo::MissingFile(file_name.clone()).into());
                 continue;
@@ -94,26 +97,53 @@ impl StudentAct
         }
         log.result()?;
 
-        let src_build_output = spec.build_command()
-            .current_dir(src_dir)
-            .output();
+        let (status,out,err) = util::run_at(context.build_command(spec),&src_dir)?;
 
-        if src_build_output.status != 0 {
-
+        if ! status.success() {
+            return Err(FailInfo::LocalBuildFail(err).into())
         }
+        println!("[X] Submission compiles in the current working directory.");
 
-        let dst_build_output = spec.build_command()
-            .current_dir(sub_dir)
-            .output();
 
-        if dst_build_output.status != 0 {
+        let (status,out,err) = util::run_at(context.build_command(spec),&sub_dir)?;
 
+        if ! status.success() {
+            return Err(FailInfo::DestBuildFail(err).into())
         }
+        println!("[X] Submission compiles in the submission directory.");
+
+        let (status,out,err) = util::run_at(context.format_command(spec),&sub_dir)?;
+
+        if ! status.success() {
+            return Err(FailInfo::FormatFail(err).into())
+        }
+        println!("[X] Submission format adjusted.");
+
+
+        let (status,out,err) = util::run_at(context.style_command(spec),&sub_dir)?;
 
         for file_name in spec.file_list.iter() {
-            let file_path = sub_path.join(file_name);
-            Command::
+            let src_path = src_dir.join(file_name);
+            let dst_path = sub_dir.join(file_name);
+            fs::copy(dst_path,src_path);
         }
+
+        if ! status.success() {
+            return Err(FailInfo::StyleFail(err).into())
+        }
+
+
+        if ! out.is_empty() {
+            println!("[~] Submission style adjusted, but with non-empty output. Output below:");
+            print!("{}",out.to_string_lossy());
+        } else {
+            println!("[X] Submission style adjusted.");
+        }
+
+
+
+        println!("Assignment '{}' submitted!",asgn_name.to_string_lossy());
+
         Ok(())
     }
 
@@ -128,7 +158,7 @@ impl StudentAct
         for asgn in context.manifest.iter()
             .filter_map(|name| context.catalog[name].as_ref().ok())
         {
-            if ! asgn.visible {
+            if ! asgn.visible || ! asgn.active {
                 continue;
             }
             println!("| {:<12} | {:<11} | {}","","","");

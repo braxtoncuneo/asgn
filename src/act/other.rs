@@ -10,4 +10,4 @@ use structopt::StructOpt;
     version    = "0.0.1",
     rename_all = "snake",
 )]
-enum OtherCmd {}
+pub enum OtherCmd {}

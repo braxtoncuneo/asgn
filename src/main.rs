@@ -3,7 +3,7 @@ pub mod act;
 pub mod asgn_spec;
 pub mod context;
 pub mod fail_info;
-
+pub mod util;
 
 use std::
 {
@@ -25,7 +25,11 @@ use fail_info::
     FailLog,
 };
 
-use context::Context;
+use context::
+{
+    Context,
+    Role,
+};
 
 use act::
 {
@@ -84,10 +88,25 @@ fn attempt_submission(context: &Context, spec: &AsgnSpec) -> Result<(),FailLog>
 fn main()
 {
 
-    let cmd = act::instructor::InstructorCmd::from_args();
     //let cmd = act::student::StudentCmd::from_args();
 
-    let ctx_try = Context::deduce(OsString::from("bcuneo"),OsString::from("cpsc1430"));
+    let mut args = std::env::args();
+
+    args.next();
+
+    let Some(instructor) = args.next() else {
+        println!("USAGE:");
+        println!("asgn <instructor> <course> <SUBCOMMAND>");
+        return;
+    };
+
+    let Some(course) = args.next() else {
+        println!("USAGE:");
+        println!("asgn <instructor> <course> <SUBCOMMAND>");
+        return;
+    };
+
+    let ctx_try = Context::deduce(OsString::from(instructor),OsString::from(course));
 
     let context = match ctx_try {
         Ok(cont) => cont,
@@ -96,16 +115,35 @@ fn main()
             return;
         },
     };
-    
-    context.announce();
 
-    let result = cmd.act.execute(&context);
+    let result = match &context.role {
+        Role::Instructor => {
+            context.announce();
+            let cmd = act::instructor::InstructorCmd::from_args();
+            cmd.act.execute(&context)
+        },
+        Role::Grader => {
+            let cmd = act::grader::GraderCmd::from_args();
+            cmd.act.execute(&context)
+        },
+        Role::Student => {
+            let cmd = act::student::StudentCmd::from_args();
+            cmd.act.execute(&context)
+        },
+        Role::Other => {
+            println!("User not recognized as member of course.");
+            return;
+        }
+    };
+
 
     if let Err(log) = result {
         print!("{}",log);
     }
 
-    context.print_failures();
+    if let Role::Instructor = &context.role {
+        context.print_failures();
+    }
 
     /*
     let opt = ::from_args();

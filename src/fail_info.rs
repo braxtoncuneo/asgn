@@ -20,6 +20,10 @@ pub enum FailInfo
     NoBaseDir(PathBuf),
     //NoSubDir(OsString),
     //NoSrcDir(PathBuf),
+    LocalBuildFail(OsString),
+    DestBuildFail(OsString),
+    FormatFail(OsString),
+    StyleFail(OsString),
     NoSpec(String,String),
     BadSpec(String,String),
     IOFail(String),
@@ -30,6 +34,7 @@ pub enum FailInfo
     MissingFile(OsString),
     FileIsDir(OsString),
     FileIsOther(OsString),
+    Unauthorized(),
 }
 
 impl FailInfo
@@ -40,19 +45,21 @@ impl FailInfo
         use FailInfo::*;
         match self {
             NoBaseDir(base_path)  => format!("Base submission directory for course '{}' does not exist.",base_path.to_string_lossy()),
-            //NoSubDir(asgn_name)   => format!("Submission directory for assignment '{}' does not exist.",asgn_name.to_string_lossy()),
-            //NoSrcDir(path)        => format!("Source directory '{}' is invalid.",path.to_string_lossy()),
-            LocalBuildFail(name)  => format!("Assignment '{}' is invalid or non-existant.",name.to_string_lossy()),
-            InvalidAsgn(name)     => format!("Assignment '{}' is invalid or non-existant.",name.to_string_lossy()),
-            InvalidUser(name)     => format!("User name '{}' is invalid or non-existant.",name.to_string_lossy()),
             NoSpec(name,desc)     => format!("Specification file for {} could not be read. IO Error '{}'.",name,desc),
             BadSpec(name,desc)    => format!("Specification file for {} is malformed. Parse Error '{}'.",name,desc),
             IOFail(desc)          => format!("IO Failure - {}.",desc),
+            InvalidAsgn(name)     => format!("Assignment '{}' is invalid or non-existant.",name.to_string_lossy()),
+            InvalidUser(name)     => format!("User name '{}' is invalid or non-existant.",name.to_string_lossy()),
             InvalidCWD()          => format!("Current working directory is invalid."),
             InvalidUID()          => format!("User identifier invalid."),
+            LocalBuildFail(err)   => format!("Build failure in current working directory:\n\n{}",err.to_string_lossy()),
+            DestBuildFail(err)    => format!("Build failure in submission directory:\n\n{}",err.to_string_lossy()),
+            FormatFail(err)       => format!("Failed to format files. Error:\n\n{}",err.to_string_lossy()),
+            StyleFail(err)        => format!("Failed to check style. Error:\n\n{}",err.to_string_lossy()),
             MissingFile(name)     => format!("File '{}' does not exist in current working directory.",name.to_string_lossy()),
             FileIsDir(name)       => format!("File '{}' is actually a directory.",name.to_string_lossy()),
             FileIsOther(name)     => format!("File '{}' in neither a file nor a directory.",name.to_string_lossy()),
+            Unauthorized()        => format!("Action is not authorized."),
         }
     }
 
@@ -61,8 +68,6 @@ impl FailInfo
         use FailInfo::*;
         match self {
             NoBaseDir(_base_path) => format!("Please contact the instructor."),
-            //NoSubDir(_asgn_name)  => format!("Please contact the instructor."),
-            //NoSrcDir(path)        => format!("Please ensure the directory '{}' actually exists.",path.to_string_lossy()),
             InvalidAsgn(name)     => format!("If you believe '{}' is a valid assignment name, please contact the instructor.",name.to_string_lossy()),
             InvalidUser(name)     => format!("If you believe '{}' is a valid user name, please contact the instructor.",name.to_string_lossy()),
             NoSpec(_name,_desc)   => format!("Please contact the instructor."),
@@ -70,9 +75,14 @@ impl FailInfo
             IOFail(_desc)         => format!("Please contact the instructor."),
             InvalidCWD()          => format!("Please ensure that the current working directory is valid."),
             InvalidUID()          => format!("Please contact the instructor."),
+            LocalBuildFail(_err)  => format!("All compilation errors must be fixed."),
+            DestBuildFail(_err)   => format!("Please ensure that only the files listed by the assignment are necessary for compilation."),
+            FormatFail(_err)      => format!("Please fix the errors noted above."),
+            StyleFail(_err)       => format!("Please fix the errors noted above."),
             MissingFile(name)     => format!("Please ensure '{}' is an existing file in your directory.",name.to_string_lossy()),
             FileIsDir(name)       => format!("Please ensure that '{}' is a file.",name.to_string_lossy()),
             FileIsOther(name)     => format!("Please unsure that '{}' is truely a file.",name.to_string_lossy()),
+            Unauthorized()        => format!("Please contact the instructor."),
         }
     }
 

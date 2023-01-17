@@ -48,7 +48,12 @@ use crate::{
         FailInfo,
         FailLog,
     },
-    asgn_spec::AsgnSpec,
+    asgn_spec::
+    {
+        AsgnSpec,
+        AsgnSpecToml,
+    },
+    util,
 };
 
 
@@ -65,9 +70,16 @@ struct CourseToml
     manifest   : Vec<String>,
     graders    : Vec<String>,
     students   : Vec<String>,
-    style_path : String,
 }
 
+
+pub enum Role
+{
+    Instructor,
+    Grader,
+    Student,
+    Other,
+}
 
 
 pub struct Context
@@ -87,6 +99,9 @@ pub struct Context
     pub manifest    : Vec<OsString>,
     pub graders     : Vec<OsString>,
     pub students    : Vec<OsString>,
+
+    // Determined by the context file + system calls
+    pub role        : Role,
 
     // Determined by trying to parse the spec of every
     // assignment in the manifest
@@ -156,6 +171,20 @@ impl Context
         let graders  : Vec<OsString> = spec.graders .into_iter().map(OsString::from).collect();
         let students : Vec<OsString> = spec.students.into_iter().map(OsString::from).collect();
 
+        let mut role = Role::Other;
+
+        if students.iter().any(|s| *s == user ) {
+            role = Role::Student;
+        }
+
+        if graders.iter().any(|g| *g == user) {
+            role = Role::Grader;
+        }
+
+        if user == instructor {
+            role = Role::Instructor;
+        }
+
         let mut context = Self {
             course,
             instructor,
@@ -167,6 +196,7 @@ impl Context
             manifest,
             graders,
             students,
+            role,
             catalog : Default::default(),
         };
 
@@ -228,79 +258,106 @@ impl Context
     }
 
 
-    pub fn refresh(&self) -> Result<(),FailLog>
+    pub fn build_command(&self,spec: &AsgnSpec) -> std::process::Command
     {
+        let path = self.base_path.join(&spec.name).join(".spec").join("Makefile");
+        let mut cmd  = std::process::Command::new("make");
+        cmd.arg(format!("--file={}",path.display()));
+        cmd
+    }
 
-        // Make sure the base directory has the correct permissions
-        Context::make_dir_public(&self.base_path,"course directory")?;
+    pub fn style_command(&self, spec: &AsgnSpec) -> std::process::Command
+    {
+        let mut cmd = self.build_command(spec);
+        cmd.arg("style");
+        cmd
+    }
 
-
-        let mut dir_builder = fs::DirBuilder::new();
-        
-        // Make sure all of the assignments have a directory with the correct permissions
-        for name in self.manifest.iter() {
-            let asgn_path = self.base_path.join(name);
-            dir_builder.create(&self.base_path)
-                .map_err(|err| -> FailLog {
-                    FailInfo::IOFail(format!("creating {} assignment directory : {}",name.to_string_lossy(),err)).into()
-                })?;
-            Context::make_dir_public(&self.base_path,format!("{} assignment directory",name.to_string_lossy()))?;
-        }
-
-        // Make sure all of the assignment directories have a subdirectory for each student,
-        // again - with the correct permissions
-
-
-        
-        // Make sure every grader has a grading directory with the correct permissions
-
-
-        Ok(())
+    pub fn format_command(&self, spec: &AsgnSpec) -> std::process::Command
+    {
+        let mut cmd = self.build_command(spec);
+        cmd.arg("format");
+        cmd
     }
 
 
-    /*
     pub fn refresh(&self) -> Result<(),FailLog>
     {
-        let mut dir_builder = fs::DirBuilder::new();
-        dir_builder.create(&self.base_path)
-            .map_err(|err|{
-                FailInfo::IOFail(format!("creating base directory : {}",err))
-            })?;
-        
-        let mut perm = fs::metadata(&self.base_path)
-            .map_err(|err| {
-                FailInfo::IOFail(format!("opening base directory : {}",err))
-            })?.permissions();
-        
-        perm.set_mode(0o755);
+        util::refresh_dir(&self.base_path,0o755,Vec::new().iter())?;
         
         let course_file_path = self.base_path.join(".course.toml");
-        let course_file = fs::File::open(&course_file_path)
-            .or_else (|err| -> Result<fs::File,FailLog> {
-                match err.kind() {
-                    ErrorKind::NotFound => {
-                        let mut file = fs::File::create(&course_file_path)
-                            .map_err(|inner_err| -> FailLog {
-                                FailInfo::IOFail(format!("creating course file : {}",inner_err)).into()
-                            })?;
-                        let course_toml : CourseToml = Default::default();
-                        let course_text = toml::to_string(&course_toml).unwrap();
-                        file.write_all(course_text.as_bytes())
-                            .map_err(|inner_err| -> FailLog {
-                                FailInfo::IOFail(format!("initializing course file : {}",inner_err)).into()
-                            })?;
-                        Ok(file)
-                    },
-                    x => Err(FailInfo::IOFail(format!("opening course file : {}",x)).into()),
-                }
-            })?;
-        
+        let course_toml : CourseToml = Default::default();
+        let course_text = toml::to_string(&course_toml).unwrap();
+        util::refresh_file(&course_file_path,0o644,course_text)?;
 
-        todo!()
+        let course_format_path = self.base_path.join(".clang-format");
+        let course_style_path  = self.base_path.join(".clang-tidy");
+        util::refresh_file(&course_format_path,0o644,"".to_string())?;
+        util::refresh_file(&course_style_path ,0o644,"".to_string())?;
+
+        for asgn in self.manifest.iter() {
+
+            let asgn_path = self.base_path.join(asgn);
+            util::refresh_dir(&asgn_path,0o755,Vec::new().iter())?;
+
+            let asgn_spec_path = asgn_path.join(".spec");
+            util::refresh_dir(&asgn_spec_path,0o755,Vec::new().iter())?;
+
+            let asgn_info_path = asgn_spec_path.join("info.toml");
+            let mut asgn_toml = AsgnSpecToml::default_with_name(asgn);
+            let asgn_text = toml::to_string(&asgn_toml).unwrap();
+            util::refresh_file(&asgn_info_path,0o644,asgn_text)?;
+
+            let asgn_make_path = asgn_spec_path.join("Makefile");
+            let make_text = AsgnSpec::default_makefile(asgn.to_string_lossy());
+            util::refresh_file(&asgn_make_path,0o644,make_text)?;
+
+            let asgn_check_path = asgn_spec_path.join("check");
+            util::refresh_dir(&asgn_spec_path,0o755,Vec::new().iter())?;
+
+
+            for stud in self.students.iter() {
+                let asgn_sub_path = asgn_path.join(stud);
+                let mut facl_list : Vec<util::FaclEntry> = Vec::new();
+                let inst_entry = util::FaclEntry {
+                    user  : self.instructor.clone(),
+                    read  : true,
+                    write : true,
+                    exe   : true,
+                };
+
+                facl_list.push(inst_entry);
+                
+                let stud_entry = util::FaclEntry {
+                    user  : stud.clone(),
+                    read  : true,
+                    write : true,
+                    exe   : true,
+                };
+
+                facl_list.push(stud_entry);
+                
+                for grad in self.graders.iter () {
+                    if grad == &self.instructor  || grad == stud {
+                        continue;
+                    }
+                    let grad_entry = util::FaclEntry {
+                        user  : grad.clone(),
+                        read  : true,
+                        write : false,
+                        exe   : false,
+                    };
+                    facl_list.push(grad_entry);
+                }
+
+                util::refresh_dir(asgn_sub_path,0o700,facl_list.iter());
+
+            }
+        } 
+
+        Ok(())
 
     }
-    */
 
 
 }

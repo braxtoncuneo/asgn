@@ -4,6 +4,7 @@ use std::
     ffi::
     {
         OsString,
+        OsStr,
     },
     fs::{
         self,
@@ -43,8 +44,16 @@ use crate::{
 };
 
 
+use users::
+{
+    get_user_by_uid,
+    get_current_uid,
+};
+
+
+
 #[derive(Serialize,Deserialize)]
-struct AsgnSpecToml
+pub struct AsgnSpecToml
 {
     name      : String,
     active    : bool,
@@ -53,7 +62,43 @@ struct AsgnSpecToml
     file_list : Vec<String>,
 }
 
+impl Default for AsgnSpecToml
+{
+    fn default() -> Self
+    {
+        let date = toml::value::Date {
+            year  : 1970,
+            month : 1,
+            day   : 1,
+        };
 
+        let deadline = toml::value::Datetime {
+            date   : Some(date),
+            time   : None,
+            offset : None,
+        };
+
+        Self {
+            name      : "<put name here>".to_string(),
+            active    : false,
+            visible   : false,
+            deadline,
+            file_list : Vec::new(),
+        }
+    }
+}
+
+
+impl AsgnSpecToml
+{
+ 
+    pub fn default_with_name <S: AsRef<OsStr>> (name : S) -> Self {
+        let mut result : Self = Default::default();
+        result.name = name.as_ref().to_string_lossy().to_string();
+        result
+    }
+
+}
 
 
 
@@ -107,6 +152,7 @@ impl TryFrom<AsgnSpecToml> for AsgnSpec
 impl AsgnSpec
 {
 
+
     pub fn new(path : PathBuf) -> Result<Self,FailLog>
     {
 
@@ -145,6 +191,25 @@ impl AsgnSpec
 
     }
 
+    pub fn default_makefile <F: std::fmt::Display> (name: F) -> String {
+        format!(
+           "\nflags =  -Wall -Werror -pedantic -std=c++11\
+            \nfile = {name}\
+            \n\
+            \n$(file): $(file).cpp\
+            \n\tg++ -fdiagnostics-color=always $(file).cpp -o $(file) $(flags)\
+            \n\
+            \nformat: $(file).cpp\
+            \n\t@clang-format -i $(file).cpp\
+            \n\
+            \nstyle: $(file).cpp\
+            \n\t@clang-tidy --use-color --fix --quiet $(file).cpp -- $(flags) -include \"iostream\"\
+            \n\
+            \ncheck: $(file).cpp\
+            \n\techo \"No checks provided for this assignment\""
+        )
+    }
+
 
 }
 
@@ -164,12 +229,14 @@ pub struct SubmissionStatus
 }
 
 
+
+
+
 #[derive(Serialize,Deserialize)]
 struct BonusToml
 {
     pub value : i64,
 }
-
 
 #[derive(Serialize,Deserialize)]
 struct ExtensionToml
@@ -204,10 +271,11 @@ impl <'ctx> SubmissionDir<'ctx>
             .map_err(|err| -> FailLog {
                 FailInfo::IOFail(format!("reading bonus file : {}",err)).into()
             })?;
-        toml::from_str(&toml_text)
+        let bonus : BonusToml = toml::from_str(&toml_text)
             .map_err(|err| -> FailLog {
                 FailInfo::IOFail(format!("deserializing bonus file : {}",err)).into()
-            })
+            })?;
+        Ok(bonus.value)
     }
 
     pub fn set_bonus(&self, value: i64) -> Result<(),FailLog>
@@ -220,33 +288,85 @@ impl <'ctx> SubmissionDir<'ctx>
         fs::write(self.bonus_path(),toml_text)
             .map_err(|err| -> FailLog {
                 FailInfo::IOFail(format!("writing bonus file : {}",err)).into()
-            })
+            });
+        Ok(())
     }
 
-    pub fn get_extension(&self) -> Result<Option<u8>,FailLog>
+    pub fn get_extension(&self) -> Result<i64,FailLog>
     {
-        todo!()
+        let ext_path = self.extension_path();
+
+        if ! ext_path.exists() {
+            return Ok(0);
+        }
+        if ext_path.is_dir() {
+            return Ok(0);
+        }
+
+        let toml_text = read_to_string(ext_path)
+            .map_err(|err| -> FailLog {
+                FailInfo::IOFail(format!("reading extension file : {}",err)).into()
+            })?;
+        let ext : ExtensionToml = toml::from_str(&toml_text)
+            .map_err(|err| -> FailLog {
+                FailInfo::IOFail(format!("deserializing extension file : {}",err)).into()
+            })?;
+        
+        Ok(ext.value)
     } 
 
-    pub fn set_extension(&self) -> Result<(),FailLog>
+    pub fn set_extension(&self, value: i64) -> Result<(),FailLog>
     {
-        todo!()
+        let ext_path = self.extension_path();
+
+        let ext_toml = ExtensionToml { value };
+        let toml_text  = toml::to_string(&ext_toml)
+            .map_err( |err| -> FailLog {
+                FailInfo::IOFail(format!("serializing extension file : {}",err)).into()
+            })?;
+        fs::write(self.bonus_path(),toml_text)
+            .map_err(|err| -> FailLog {
+                FailInfo::IOFail(format!("writing extension file : {}",err)).into()
+            });
+        Ok(())
     }
 
-    pub fn status(&self) -> SubmissionStatus
+    pub fn status(&self) -> Result<SubmissionStatus,FailLog>
     {
-        todo!()
+        let submitted = self.file_paths().into_iter()
+            .map(|p| p.exists() && p.is_file() )
+            .all(|x| x);
+
+        let time : Option<i64> = if submitted {
+            let mut mtime : i64 = 0;
+            for path in self.file_paths().into_iter() {
+                let meta = fs::metadata(path)
+                    .map_err(|err|{
+                       FailInfo::IOFail(format!("{}",err.kind())).into_log() 
+                    })?;
+                mtime = mtime.max(meta.mtime());
+            }
+            Some(mtime)
+        } else {
+            None
+        };
+
+        let turn_in_time = if let Some(seconds) = time {
+            let turn_in = Local.timestamp_opt(seconds,0)
+            .earliest()
+            .ok_or(FailInfo::IOFail("Impossible time conversion".to_string()).into_log())?;
+            Some(turn_in)
+        } else {
+            None
+        };
+
+        Ok(SubmissionStatus {
+            turn_in_time,
+            bonus_days     : self.get_bonus()?,
+            extension_days : self.get_extension()?,
+        })
     }
 
-    pub fn copy_into_sub(&self, source_path: PathBuf)
-    {
-        todo!()
-    }
-
-    pub fn copy_from_sub(&self, destination_path: PathBuf)
-    {
-        todo!()
-    }
 
     pub fn refresh(self)
     {
@@ -254,4 +374,9 @@ impl <'ctx> SubmissionDir<'ctx>
     }
 
 }
+
+
+
+
+
 
