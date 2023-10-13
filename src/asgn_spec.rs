@@ -44,11 +44,6 @@ use crate::{
 };
 
 
-use users::
-{
-    get_user_by_uid,
-    get_current_uid,
-};
 
 
 
@@ -205,8 +200,8 @@ impl AsgnSpec
             \nstyle: $(file).cpp\
             \n\t@clang-tidy --use-color --fix --quiet $(file).cpp -- $(flags) -include \"iostream\"\
             \n\
-            \ncheck: $(file).cpp\
-            \n\techo \"No checks provided for this assignment\""
+            \ntest: $(file).cpp\
+            \n\t@echo \"No automated tests provided for this assignment.\""
         )
     }
 
@@ -214,11 +209,11 @@ impl AsgnSpec
 }
 
 
-pub struct SubmissionDir <'ctx>
+pub struct SubmissionSlot <'ctx>
 {
-    context   : &'ctx Context,
-    asgn_spec : &'ctx AsgnSpec,
-    base_path : PathBuf,
+    pub context   : &'ctx Context,
+    pub asgn_spec : &'ctx AsgnSpec,
+    pub base_path : PathBuf,
 }
 
 pub struct SubmissionStatus
@@ -245,7 +240,7 @@ struct ExtensionToml
 }
 
 
-impl <'ctx> SubmissionDir<'ctx>
+impl <'ctx> SubmissionSlot<'ctx>
 {
 
     pub fn bonus_path(&self) -> PathBuf
@@ -270,8 +265,11 @@ impl <'ctx> SubmissionDir<'ctx>
         let toml_text = read_to_string(self.bonus_path())
             .map_err(|err| -> FailLog {
                 FailInfo::IOFail(format!("reading bonus file : {}",err)).into()
-            })?;
-        let bonus : BonusToml = toml::from_str(&toml_text)
+            });
+        if toml_text.is_err() {
+            return Ok(0);
+        }
+        let bonus : BonusToml = toml::from_str(&toml_text.unwrap())
             .map_err(|err| -> FailLog {
                 FailInfo::IOFail(format!("deserializing bonus file : {}",err)).into()
             })?;
@@ -288,7 +286,7 @@ impl <'ctx> SubmissionDir<'ctx>
         fs::write(self.bonus_path(),toml_text)
             .map_err(|err| -> FailLog {
                 FailInfo::IOFail(format!("writing bonus file : {}",err)).into()
-            });
+            })?;
         Ok(())
     }
 
@@ -317,7 +315,7 @@ impl <'ctx> SubmissionDir<'ctx>
 
     pub fn set_extension(&self, value: i64) -> Result<(),FailLog>
     {
-        let ext_path = self.extension_path();
+        let _ext_path = self.extension_path();
 
         let ext_toml = ExtensionToml { value };
         let toml_text  = toml::to_string(&ext_toml)
@@ -327,7 +325,7 @@ impl <'ctx> SubmissionDir<'ctx>
         fs::write(self.bonus_path(),toml_text)
             .map_err(|err| -> FailLog {
                 FailInfo::IOFail(format!("writing extension file : {}",err)).into()
-            });
+            })?;
         Ok(())
     }
 
@@ -376,7 +374,44 @@ impl <'ctx> SubmissionDir<'ctx>
 }
 
 
+impl SubmissionStatus {
+
+    pub fn time_past(&self,time: &DateTime<Local>) -> Option<Duration> {
+        let difference = self.turn_in_time?.signed_duration_since(*time);
+        return Some(difference)
+    }
+
+    pub fn versus(&self,time: &DateTime<Local>) -> String {
+
+        let late_by = self.time_past(time);
+
+        if late_by.is_none() {
+            let time_diff = chrono::offset::Local::now().signed_duration_since(*time);
+            if time_diff.num_seconds() <= 0 {
+                return String::from("Not Submitted");
+            } else {
+                return String::from("Missing");
+            }
+        }
+
+        let late_by = late_by.unwrap();
+
+        let mut total : i64 = 0;
+        let days : i64 = late_by.num_days();
+        total += days;
+        total *= 24;
+        let hours : i64 = late_by.num_hours() - total;
+        total += hours;
+        total *= 60;
+        let mins : i64 = late_by.num_minutes() - total;
+        
+        if late_by.num_seconds() > 0 {
+            format!("Late {}d {}h {}m",days,hours,mins)
+        } else {
+            format!("Early {}d {}h {}m",-days,-hours,-mins)
+        }
+    }
 
 
-
+}
 

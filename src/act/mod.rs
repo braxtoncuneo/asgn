@@ -39,7 +39,7 @@ enum Role
 impl Role
 {
 
-    fn determine(context: &Context) -> Result<Self,FailLog>
+    fn determine(_context: &Context) -> Result<Self,FailLog>
     {
         todo!()
     }

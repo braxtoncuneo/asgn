@@ -12,6 +12,7 @@ use std::
     }
 };
 
+use colored::Colorize;
 
 
 #[derive(Debug,Clone)]
@@ -24,6 +25,7 @@ pub enum FailInfo
     DestBuildFail(OsString),
     FormatFail(OsString),
     StyleFail(OsString),
+    TestFail(OsString),
     NoSpec(String,String),
     BadSpec(String,String),
     IOFail(String),
@@ -32,8 +34,10 @@ pub enum FailInfo
     InvalidAsgn(OsString),
     InvalidUser(OsString),
     MissingFile(OsString),
+    MissingSub(OsString),
     FileIsDir(OsString),
     FileIsOther(OsString),
+    NoSetup(OsString),
     Unauthorized(),
 }
 
@@ -44,22 +48,90 @@ impl FailInfo
     {
         use FailInfo::*;
         match self {
-            NoBaseDir(base_path)  => format!("Base submission directory for course '{}' does not exist.",base_path.to_string_lossy()),
-            NoSpec(name,desc)     => format!("Specification file for {} could not be read. IO Error '{}'.",name,desc),
-            BadSpec(name,desc)    => format!("Specification file for {} is malformed. Parse Error '{}'.",name,desc),
-            IOFail(desc)          => format!("IO Failure - {}.",desc),
-            InvalidAsgn(name)     => format!("Assignment '{}' is invalid or non-existant.",name.to_string_lossy()),
-            InvalidUser(name)     => format!("User name '{}' is invalid or non-existant.",name.to_string_lossy()),
-            InvalidCWD()          => format!("Current working directory is invalid."),
-            InvalidUID()          => format!("User identifier invalid."),
-            LocalBuildFail(err)   => format!("Build failure in current working directory:\n\n{}",err.to_string_lossy()),
-            DestBuildFail(err)    => format!("Build failure in submission directory:\n\n{}",err.to_string_lossy()),
-            FormatFail(err)       => format!("Failed to format files. Error:\n\n{}",err.to_string_lossy()),
-            StyleFail(err)        => format!("Failed to check style. Error:\n\n{}",err.to_string_lossy()),
-            MissingFile(name)     => format!("File '{}' does not exist in current working directory.",name.to_string_lossy()),
-            FileIsDir(name)       => format!("File '{}' is actually a directory.",name.to_string_lossy()),
-            FileIsOther(name)     => format!("File '{}' in neither a file nor a directory.",name.to_string_lossy()),
-            Unauthorized()        => format!("Action is not authorized."),
+            NoBaseDir(base_path)    => format!("{} '{}' {}",
+                "Base submission directory for course".red(),
+                base_path.to_string_lossy(),
+                "does not exist".red()
+            ),
+            NoSpec(name,desc)       => format!( "{} {} {} '{}'",
+                "Specification file for".red(),
+                name,
+                "could not be read. IO Error".red(),
+                desc
+            ),
+            BadSpec(name,desc)      => format!( "{} {} {} '{}'",
+                "Specification file for".red(),
+                name,
+                "is malformed. Parse Error".red(),
+                desc
+            ),
+            IOFail(desc)            => format!( "{} '{}'",
+                "IO Failure".red(),
+                desc
+            ),
+            InvalidAsgn(name)       => format!("{} '{}' {}",
+                "Assignment".red(),
+                name.to_string_lossy(),
+                "is invalid or non-existant.".red(),
+            ),
+            InvalidUser(name)       => format!("{} '{}' {}",
+                "User name".red(),
+                name.to_string_lossy(),
+                "is invalid or non-existant".red(),
+            ),
+            InvalidCWD()            => format!("{}",
+                "Current working directory is invalid.".red()
+            ),
+            InvalidUID()            => format!("{}",
+                "User identifier invalid.".red()
+            ),
+            LocalBuildFail(err)     => format!("{}\n\n{}",
+                "Build failure in current working directory:".red(),
+                err.to_string_lossy()
+            ),
+            DestBuildFail(err)      => format!("{}\n\n{}",
+                "Build failure in submission directory:".red(),
+                err.to_string_lossy()
+            ),
+            FormatFail(err)         => format!("{}\n\n{}",
+                "Failed to format files. Error:".red(),
+                err.to_string_lossy()
+            ),
+            StyleFail(err)          => format!("{}\n\n{}",
+                "Failed to check style. Error:".red(),
+                err.to_string_lossy()
+            ),
+            TestFail(err)           => format!("{}\n\n{}",
+                "Failed to test functionality due to internal error. Error:".red(),
+                err.to_string_lossy()
+            ),
+            MissingFile(name)       => format!("{} '{}' {}",
+                "File".red(),
+                name.to_string_lossy(),
+                "does not exist in current working directory.".red()
+            ),
+            MissingSub(name)        => format!("{} '{}' {}",
+                "File".red(),
+                name.to_string_lossy(),
+                "does not exist in the submission directory".red()
+            ),
+            FileIsDir(name)         => format!("{} '{}' {}",
+                "File".red(),
+                name.to_string_lossy(),
+                "is actually a directory".red(),
+            ),
+            FileIsOther(name)       => format!("{} '{}' {}",
+                "File".red(),
+                name.to_string_lossy(),
+                "in neither a file nor a directory".red(),
+            ),
+            NoSetup(name)           => format!("{} '{}'",
+                "Setup files are not available for assignment".red(),
+                name.to_string_lossy()
+            ),
+            Unauthorized()          => format!( "{}",
+                "Action is not authorized".red()
+            ),
         }
     }
 
@@ -67,22 +139,77 @@ impl FailInfo
     {
         use FailInfo::*;
         match self {
-            NoBaseDir(_base_path) => format!("Please contact the instructor."),
-            InvalidAsgn(name)     => format!("If you believe '{}' is a valid assignment name, please contact the instructor.",name.to_string_lossy()),
-            InvalidUser(name)     => format!("If you believe '{}' is a valid user name, please contact the instructor.",name.to_string_lossy()),
-            NoSpec(_name,_desc)   => format!("Please contact the instructor."),
-            BadSpec(_name,_desc)  => format!("Please contact the instructor."),
-            IOFail(_desc)         => format!("Please contact the instructor."),
-            InvalidCWD()          => format!("Please ensure that the current working directory is valid."),
-            InvalidUID()          => format!("Please contact the instructor."),
-            LocalBuildFail(_err)  => format!("All compilation errors must be fixed."),
-            DestBuildFail(_err)   => format!("Please ensure that only the files listed by the assignment are necessary for compilation."),
-            FormatFail(_err)      => format!("Please fix the errors noted above."),
-            StyleFail(_err)       => format!("Please fix the errors noted above."),
-            MissingFile(name)     => format!("Please ensure '{}' is an existing file in your directory.",name.to_string_lossy()),
-            FileIsDir(name)       => format!("Please ensure that '{}' is a file.",name.to_string_lossy()),
-            FileIsOther(name)     => format!("Please unsure that '{}' is truely a file.",name.to_string_lossy()),
-            Unauthorized()        => format!("Please contact the instructor."),
+            NoBaseDir(_base_path)   => format!("{}",
+                "Please contact the instructor.".yellow()
+            ),
+            InvalidAsgn(name)       => format!("{} '{}' {}",
+                "If you believe".yellow(),
+                name.to_string_lossy(),
+                "is a valid assignment name, please contact the instructor.".yellow(),
+            ),
+            InvalidUser(name)       => format!("{} '{}' {}",
+                "If you believe".yellow(),
+                name.to_string_lossy(),
+                "is a valid user name, please contact the instructor.".yellow(),
+            ),
+            NoSpec(_name,_desc)     => format!("{}",
+                "Please contact the instructor.".yellow()
+            ),
+            BadSpec(_name,_desc)    => format!("{}",
+                "Please contact the instructor.".yellow()
+            ),
+            IOFail(_desc)           => format!("{}",
+                "Please contact the instructor.".yellow()
+            ),
+            InvalidCWD()            => format!("{}",
+                "Please ensure that the current working directory is valid.".yellow()
+            ),
+            InvalidUID()            => format!("{}",
+                "Please contact the instructor.".yellow()
+            ),
+            LocalBuildFail(_err)    => format!("{}",
+                "All compilation errors must be fixed.".yellow()
+            ),
+            DestBuildFail(_err)     => format!("{}",
+                "Please ensure that only the files listed by the assignment are necessary for compilation.".yellow()
+            ),
+            FormatFail(_err)        => format!("{}",
+                "Please fix the errors noted above.".yellow()
+            ),
+            StyleFail(_err)         => format!("{}",
+                "Please fix the errors noted above.".yellow()
+            ),
+            TestFail(_err)           => format!("{}",
+                "Please contact the instructor.".yellow()
+            ),
+            MissingFile(name)       => format!("{} '{}' {}",
+                "Please ensure".yellow(),
+                name.to_string_lossy(),
+                "is an existing file in your directory.".yellow(),
+            ),
+            MissingSub(name)        => format!("{} '{}' {}",
+                "File",
+                name.to_string_lossy(),
+                "cannot be recovered.".yellow(),
+            ),
+            FileIsDir(name)         => format!("{} '{}' {}",
+                "Please ensure that".yellow(),
+                name.to_string_lossy(),
+                "is a file.".yellow(),
+            ),
+            FileIsOther(name)       => format!("{} '{}' {}",
+                "Please ensure that".yellow(),
+                name.to_string_lossy(),
+                "is truely a file.".yellow(),
+            ),
+            NoSetup(name)           => format!("{} '{}' {}",
+                "If you believe assignment".yellow(),
+                name.to_string_lossy(),
+                "should have setup files, please contact the instructor".yellow(),
+            ),
+            Unauthorized()          => format!("{}",
+                "Please contact the instructor".yellow()
+            ),
         }
     }
 
@@ -103,7 +230,7 @@ impl fmt::Display for FailInfo
     }
 }
 
-#[derive(Default,Clone)]
+#[derive(Default,Clone,Debug)]
 pub struct FailLog(Vec<FailInfo>);
 
 impl FailLog
@@ -175,10 +302,10 @@ impl fmt::Display for FailLog
     {
         let mut acc = String::new();
         for item in self.0.iter() {
-            acc.push_str("! ");
-            acc.push_str(&item.description());
-            acc.push_str("\n> ");
-            acc.push_str(&item.advice());
+            acc.push_str(&format!("{}", "! ".red()));
+            acc.push_str(&format!("{}",&item.description()));
+            acc.push_str(&format!("{}", "\n> ".yellow()));
+            acc.push_str(&format!("{}",&item.advice()));
             acc.push_str("\n");
         }
         write!(f,"{}",acc)

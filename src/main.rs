@@ -1,4 +1,4 @@
-
+#![allow(dead_code)]
 pub mod act;
 pub mod asgn_spec;
 pub mod context;
@@ -31,13 +31,6 @@ use context::
     Role,
 };
 
-use act::
-{
-    instructor,
-    grader,
-    student,
-    other,
-};
 
 use asgn_spec::AsgnSpec;
 

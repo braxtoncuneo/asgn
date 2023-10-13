@@ -5,7 +5,6 @@ use std::
 {
     ffi::OsString,
     fs,
-    os::unix::ffi::OsStringExt,
     process::Command,
 };
 
@@ -21,7 +20,6 @@ use crate::
     util::
     {
         self,
-        FaclEntry,
     },
 };
 
@@ -98,20 +96,20 @@ pub enum GraderAct
 impl GraderAct
 {
 
-    fn check(asgn_name: &OsString, user_name: &OsString, context: &Context) -> Result<(),FailLog>
+    fn check(_asgn_name: &OsString, _user_name: &OsString, _context: &Context) -> Result<(),FailLog>
     {
-        Ok(())
+        todo!()
     }
 
-    fn check_all(asgn_name: &OsString, context: &Context) -> Result<(),FailLog>
+    fn check_all(_asgn_name: &OsString, _context: &Context) -> Result<(),FailLog>
     {
-        Ok(())
+        todo!()
     }
 
 
-    fn check_local(asgn_name: &OsString, context: &Context) -> Result<(),FailLog>
+    fn check_local(_asgn_name: &OsString, _context: &Context) -> Result<(),FailLog>
     {
-        Ok(())
+        todo!()
     }
 
 
@@ -138,7 +136,10 @@ impl GraderAct
                     FailInfo::IOFail(format!("could not remove file {} : {}",dst_dir.display(),err)).into_log()
                 })?;
         }
-        fs::create_dir(&dst_dir);
+        fs::create_dir(&dst_dir)
+            .map_err(|err| {
+                FailInfo::IOFail(format!("could not create directory {} : {}",dst_dir.display(),err)).into_log()
+            })?;
         
         for file_name in spec.file_list.iter() {
             let src_path = sub_path.join(file_name);
@@ -146,53 +147,74 @@ impl GraderAct
             if src_path.is_dir() {
                 continue;
             }
-            fs::copy(src_path,dst_path);
+            fs::copy(&src_path,&dst_path)
+                .map_err(|err| {
+                    FailInfo::IOFail(format!("could not copy file {} to {} : {}",
+                    (&src_path).display(),(&dst_path).display(),err)).into_log()
+                })?;
         }
             
         let src_format_path = context.base_path.join(".clang-format");
         let src_style_path  = context.base_path.join(".clang-tidy");
         let dst_format_path = dst_dir.join(".clang-format");
         let dst_style_path  = dst_dir.join(".clang-tidy");
-        fs::copy(src_format_path,dst_format_path);
-        fs::copy(src_style_path,dst_style_path);
+        fs::copy(&src_format_path,&dst_format_path)
+            .map_err(|err| {
+                FailInfo::IOFail(format!("could not copy format file {} to {} : {}",
+                (&src_format_path).display(),(&dst_format_path).display(),err)).into_log()
+            })?;
+        fs::copy(&src_style_path,&dst_style_path)
+            .map_err(|err| {
+                FailInfo::IOFail(format!("could not copy style file {} to {} : {}",
+                (&src_style_path).display(),(&dst_style_path).display(),err)).into_log()
+            })?;
 
 
-        let (status,out,err) = util::run_at(context.build_command(spec),&dst_dir)?;
+        let (status,_out,err) = util::run_at(context.build_command(spec),&dst_dir,false)?;
         if ! status.success() {
             let name = asgn_name.to_string_lossy();
             let comp_name = (name.clone() + ".comp").to_string();
             let comp_path = dst_dir.join(&comp_name);
-            println!("Assignment files failed to build. Comipler output written to {}.comp",comp_name);
-            fs::write(comp_path,out.to_string_lossy().to_string());
+            fs::write(&comp_path,err.to_string_lossy().to_string())
+                .map_err(|err| {
+                    FailInfo::IOFail(format!("could not write compiler output to {} : {}",
+                    (&comp_path).display(),err)).into_log()
+                })?;
+            println!("Assignment files failed to build. Compiler output written to {}",comp_name);
             return Ok(())
         }
         
         let style_dir = dst_dir.join(".style");
-        util::refresh_dir(&style_dir,0o700,Vec::new().iter());        
+        util::refresh_dir(&style_dir,0o700,Vec::new().iter())?;        
         for file_name in spec.file_list.iter() {
             let src_path =   dst_dir.join(file_name);
             let dst_path = style_dir.join(file_name);
             if src_path.is_dir() {
                 continue;
             }
-            fs::copy(src_path,dst_path);
+            fs::copy(&src_path,&dst_path)
+                .map_err(|err| {
+                    FailInfo::IOFail(format!("could not copy file {} to {} : {}",
+                    (&src_path).display(),(&dst_path).display(),err)).into_log()
+                })?;
         }
 
-        let (status,out,err) = util::run_at(context.format_command(spec),&style_dir)?;
+        let (status,_out,err) = util::run_at(context.format_command(spec),&style_dir,false)?;
         if ! status.success() {
             return Err(FailInfo::FormatFail(err).into())
         }
-        let (status,out,err) = util::run_at(context.style_command(spec),&style_dir)?;
-        if ! status.success() {
-            return Err(FailInfo::StyleFail(err).into())
-        }
+        let (_status,out,_err) = util::run_at(context.style_command(spec),&style_dir,false)?;
 
         if ! out.is_empty() {
             let name = asgn_name.to_string_lossy();
             let warn_name = (name.clone() + ".warn").to_string();
             let warn_path = dst_dir.join(&warn_name);
-            println!("Assignment files produce style warnings. Warnings written to {}.warn",warn_name);
-            fs::write(warn_path,out.to_string_lossy().to_string());
+            fs::write(&warn_path,out.to_string_lossy().to_string())
+                .map_err(|err| {
+                    FailInfo::IOFail(format!("could not write style checker output to {} : {}",
+                    (&warn_path).display(),err)).into_log()
+                })?;
+            println!("Submission files produced style warnings. Warnings written to {}",warn_name);
         }
 
         for file_name in spec.file_list.iter() {
@@ -200,14 +222,18 @@ impl GraderAct
             let sty_path = style_dir.join(file_name);
             let mut diff = Command::new("diff");
             diff.arg("--color=always").arg(&cwd_path).arg(&sty_path);
-            let (status,out,err) = util::run_at(diff,&dst_dir)?;
+            let (_status,out,_err) = util::run_at(diff,&dst_dir,false)?;
             
             if ! out.is_empty() {
                 let name = file_name.to_string_lossy();
                 let diff_name = (name.clone() + ".diff").to_string();
                 let diff_path = dst_dir.join(&diff_name);
+                fs::write(&diff_path,out.to_string_lossy().to_string())
+                    .map_err(|err| {
+                        FailInfo::IOFail(format!("could not write format diff output to {} : {}",
+                        (&diff_path).display(),err)).into_log()
+                    })?;
                 println!("File {name} differs from course style. Difference written to {}",diff_name);
-                fs::write(diff_path,out.to_string_lossy().to_string());
             }
         }
 
@@ -219,7 +245,7 @@ impl GraderAct
         let mut log : FailLog = Default::default();
         for student_name in context.students.iter() {
             println!("Processing {}",student_name.to_string_lossy());
-            Self::copy(asgn_name,student_name,context)
+            let _ = Self::copy(asgn_name,student_name,context)
                 .map_err(|err| log.extend(err));
         }
         log.result()

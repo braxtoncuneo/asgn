@@ -9,20 +9,7 @@ use std::
         OsStr,
     },
     fs,
-    io::
-    {
-        ErrorKind,
-        Write,
-    },
-    os::
-    {
-        unix::fs::
-        {
-            MetadataExt,
-            DirBuilderExt,
-            PermissionsExt,
-        }
-    },
+    os::unix::fs::PermissionsExt,
     path::
     {
         Path,
@@ -280,6 +267,13 @@ impl Context
         cmd
     }
 
+    pub fn test_command(&self, spec: &AsgnSpec) -> std::process::Command
+    {
+        let mut cmd = self.build_command(spec);
+        cmd.arg("test");
+        cmd
+    }
+
 
     pub fn refresh(&self) -> Result<(),FailLog>
     {
@@ -304,7 +298,7 @@ impl Context
             util::refresh_dir(&asgn_spec_path,0o755,Vec::new().iter())?;
 
             let asgn_info_path = asgn_spec_path.join("info.toml");
-            let mut asgn_toml = AsgnSpecToml::default_with_name(asgn);
+            let asgn_toml = AsgnSpecToml::default_with_name(asgn);
             let asgn_text = toml::to_string(&asgn_toml).unwrap();
             util::refresh_file(&asgn_info_path,0o644,asgn_text)?;
 
@@ -312,7 +306,7 @@ impl Context
             let make_text = AsgnSpec::default_makefile(asgn.to_string_lossy());
             util::refresh_file(&asgn_make_path,0o644,make_text)?;
 
-            let asgn_check_path = asgn_spec_path.join("check");
+            let _asgn_check_path = asgn_spec_path.join("check");
             util::refresh_dir(&asgn_spec_path,0o755,Vec::new().iter())?;
 
 
@@ -350,7 +344,7 @@ impl Context
                     facl_list.push(grad_entry);
                 }
 
-                util::refresh_dir(asgn_sub_path,0o700,facl_list.iter());
+                util::refresh_dir(asgn_sub_path,0o700,facl_list.iter())?;
 
             }
         } 

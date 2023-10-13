@@ -6,7 +6,6 @@ use crate::
     context::Context,
     fail_info::
     {
-        FailInfo,
         FailLog,
     },
 };
@@ -58,7 +57,6 @@ pub enum InstructorAct
         #[structopt(name = "user names")]
         user_names: Vec<OsString>,
     },
-    */
     #[structopt(about = "[instructors only] checks an assignment specification for validity")]
     Audit
     {
@@ -68,6 +66,7 @@ pub enum InstructorAct
     
     #[structopt(about = "[instructors only] checks all assignment specifications for validity")]
     AuditAll{},
+    */
     
     #[structopt(about = "[instructors only] attempts to fix the state of the course directory")]
     Refresh{},
@@ -79,26 +78,26 @@ pub enum InstructorAct
 impl InstructorAct
 {
 
-    fn add_students(user_names: &Vec<OsString>, context: &Context) -> Result<(),FailLog>
+    fn add_students(_user_names: &Vec<OsString>, _context: &Context) -> Result<(),FailLog>
     {
-        Ok(())
+        todo!()
     }
 
-    fn add_graders(user_names: &Vec<OsString>, context: &Context) -> Result<(),FailLog>
+    fn add_graders(_user_names: &Vec<OsString>, _context: &Context) -> Result<(),FailLog>
     {
-        Ok(())
-    }
-
-
-    fn audit(asgn_name: OsString, context: &Context) -> Result<(),FailLog>
-    {
-        Ok(())
+        todo!()
     }
 
 
-    fn audit_all(context: &Context) -> Result<(),FailLog>
+    fn audit(_asgn_name: OsString, _context: &Context) -> Result<(),FailLog>
     {
-        Ok(())
+        todo!()
+    }
+
+
+    fn audit_all(_context: &Context) -> Result<(),FailLog>
+    {
+        todo!()
     }
 
 
@@ -108,8 +107,8 @@ impl InstructorAct
         use InstructorAct::*;
         match self {
             Grader(act)            => act.execute(context),
-            Audit    { asgn_name } => Self::audit(asgn_name.clone(),context),
-            AuditAll {}            => Self::audit_all(context),
+            //Audit    { asgn_name } => Self::audit(asgn_name.clone(),context),
+            //AuditAll {}            => Self::audit_all(context),
             Refresh  {}            => context.refresh(),
         }
     }

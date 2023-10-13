@@ -8,7 +8,6 @@ use std::
     },
     os::unix::
     {
-        fs::PermissionsExt,
         ffi::OsStringExt,
     },
     path::Path,
@@ -16,6 +15,7 @@ use std::
     {
         Command,
         ExitStatus,
+        Stdio,
     },
 };
 
@@ -32,16 +32,30 @@ use crate::
 
 pub fn run_at
 <P : AsRef<Path> >
-(mut cmd: Command, path: P) -> Result<(ExitStatus,OsString,OsString),FailLog>
+(mut cmd: Command, path: P, pipe_stdout : bool) -> Result<(ExitStatus,OsString,OsString),FailLog>
 {
     let cmd_str = format!("{:?}",&cmd);
 
-    let output = cmd
+    let output = if pipe_stdout {
+        cmd
+        .current_dir(path.as_ref())
+        .stdout(Stdio::inherit())
+        .spawn()
+        .map_err(|err| -> FailLog {
+            FailInfo::IOFail(format!("running command {} : {}",cmd_str,err)).into()
+        })?
+        .wait_with_output()
+        .map_err(|err| -> FailLog {
+            FailInfo::IOFail(format!("running command {} : {}",cmd_str,err)).into()
+        })?
+    } else {
+        cmd
         .current_dir(path.as_ref())
         .output()
         .map_err(|err| -> FailLog {
             FailInfo::IOFail(format!("running command {} : {}",cmd_str,err)).into()
-        })?;
+        })?
+    };
 
     let stderr = OsString::from_vec(output.stderr);
     let stdout = OsString::from_vec(output.stdout);
