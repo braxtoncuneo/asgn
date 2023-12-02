@@ -34,11 +34,8 @@ use crate::
 pub struct GraderCmd
 {
 
-    #[structopt(name = "instructor")]
-    instructor : OsString,
-
-    #[structopt(name = "course")]
-    course : OsString,
+    #[structopt(name = "base path")]
+    base_path : OsString,
 
     #[structopt(subcommand)]
     pub act: GraderAct,
@@ -68,13 +65,13 @@ pub enum GraderAct
         #[structopt(name = "assignment name")]
         asgn_name: OsString,
     },
-    #[structopt(about = "[graders only] runs checks for assignment in current working directory")]
-    CheckLocal
+    */
+    #[structopt(about = "[graders only] runs tests for assignment in current working directory")]
+    Test
     {
         #[structopt(name = "assignment name")]
         asgn_name: OsString,
     },
-    */
     #[structopt(about = "[graders only] copies the directory of a specific submission to the current working directory")]
     Copy
     {
@@ -107,9 +104,16 @@ impl GraderAct
     }
 
 
-    fn check_local(_asgn_name: &OsString, _context: &Context) -> Result<(),FailLog>
+    fn test_local(asgn_name: &OsString, context: &Context) -> Result<(),FailLog>
     {
-        todo!()
+        let spec : &AsgnSpec = context.catalog.get(asgn_name)
+            .ok_or(FailInfo::InvalidAsgn(asgn_name.clone()).into_log())?
+            .as_ref().map_err(|err| err.clone() )?;
+
+        let cwd = context.cwd.clone();
+        util::run_at(context.test_command(spec),&cwd,true)?;
+
+        Ok(())
     }
 
 
@@ -258,6 +262,7 @@ impl GraderAct
             Student(act)                  => act.execute(context),
             Copy { asgn_name, stud_name } => Self::copy(asgn_name,stud_name,context),
             CopyAll { asgn_name }         => Self::copy_all(asgn_name,context),
+            Test { asgn_name }            => Self::test_local(asgn_name,context),
         }
     }
 

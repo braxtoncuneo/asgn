@@ -90,6 +90,7 @@ impl AsgnSpecToml
     pub fn default_with_name <S: AsRef<OsStr>> (name : S) -> Self {
         let mut result : Self = Default::default();
         result.name = name.as_ref().to_string_lossy().to_string();
+        result.file_list.push(format!("{}.cpp",&result.name));
         result
     }
 

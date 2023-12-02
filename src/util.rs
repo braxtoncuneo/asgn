@@ -1,3 +1,4 @@
+use dirs;
 
 use std::
 {
@@ -5,12 +6,17 @@ use std::
     fs::
     {
         self,
+        OpenOptions,
     },
+    io::Write,
     os::unix::
     {
         ffi::OsStringExt,
     },
-    path::Path,
+    path::{
+        Path,
+        PathBuf,
+    },
     process::
     {
         Command,
@@ -148,6 +154,21 @@ pub fn set_facl
     Ok(())
 }
 
+pub fn write_file
+<P : AsRef<Path>, S : AsRef<[u8]>>
+( path: P, slice: S)
+-> Result<(),FailLog>
+{
+    let path_ref : &Path = path.as_ref();
+    fs::write(path_ref,slice)
+        .map_err(|err| -> FailLog {
+            FailInfo::IOFail(format!(
+                "writing contents of {} : {}",
+                path_ref.display(),err
+            )).into()
+        })
+}
+
 
 pub fn refresh_file
 <P : AsRef<Path>>
@@ -215,6 +236,22 @@ pub fn refresh_dir
 
 
 
+pub fn bashrc_append_line
+<L : AsRef<str> + std::fmt::Display>
+(line : L) -> Result<(),FailLog> {
+    use FailInfo::*;
+    let home_path   : PathBuf = dirs::home_dir()
+        .ok_or(IOFail("Home directory cannot be determined".to_string()).into_log())?;
+    let bashrc_path : PathBuf = home_path.join(".bashrc");
+    let mut bashrc = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open(bashrc_path)
+        .map_err(|err| IOFail(format!("{}",err)))?;
+    writeln!(bashrc,"{}",line)
+        .map_err(|err| IOFail(format!("{}",err)))?;
+    Ok(())
+}
 
 
 

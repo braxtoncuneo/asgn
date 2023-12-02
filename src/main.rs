@@ -33,7 +33,7 @@ use context::
 
 
 use asgn_spec::AsgnSpec;
-
+use colored::Colorize;
 
 fn check_file_exists(base_path: &PathBuf, file_name: &OsString) -> Result<(),FailInfo>
 {
@@ -87,21 +87,15 @@ fn main()
 
     args.next();
 
-    let Some(instructor) = args.next() else {
+    let Some(base_path) = args.next() else {
         println!("USAGE:");
-        println!("asgn <instructor> <course> <SUBCOMMAND>");
+        println!("asgn <base_path> <SUBCOMMAND>");
         return;
     };
 
-    let Some(course) = args.next() else {
-        println!("USAGE:");
-        println!("asgn <instructor> <course> <SUBCOMMAND>");
-        return;
-    };
+    let ctx_try = Context::deduce(OsString::from(base_path));
 
-    let ctx_try = Context::deduce(OsString::from(instructor),OsString::from(course));
-
-    let context = match ctx_try {
+    let mut context = match ctx_try {
         Ok(cont) => cont,
         Err(err) => {
             println!("{}",err);
@@ -113,7 +107,7 @@ fn main()
         Role::Instructor => {
             context.announce();
             let cmd = act::instructor::InstructorCmd::from_args();
-            cmd.act.execute(&context)
+            cmd.act.execute(&mut context)
         },
         Role::Grader => {
             let cmd = act::grader::GraderCmd::from_args();
@@ -124,7 +118,10 @@ fn main()
             cmd.act.execute(&context)
         },
         Role::Other => {
-            println!("User not recognized as member of course.");
+            //let cmd = act::other::OtherCmd::from_args();
+            //cmd.act.execute(&context)
+            println!("{}","! User not recognized as member of course.".red());
+            println!("{}","> If you believe you are a member, contact the instructor.".yellow());
             return;
         }
     };

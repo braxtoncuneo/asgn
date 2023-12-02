@@ -1,5 +1,6 @@
 use structopt::StructOpt;
 use super::grader::GraderAct;
+use std::ffi::OsString;
 
 use crate::
 {
@@ -10,7 +11,6 @@ use crate::
     },
 };
 
-use std::ffi::OsString;
 
 
 #[derive(Debug,StructOpt)]
@@ -24,11 +24,8 @@ use std::ffi::OsString;
 pub struct InstructorCmd
 {
 
-    #[structopt(name = "instructor")]
-    instructor : OsString,
-
-    #[structopt(name = "course")]
-    course : OsString,
+    #[structopt(name = "base path")]
+    base_path : OsString,
 
     #[structopt(subcommand)]
     pub act: InstructorAct,
@@ -44,9 +41,14 @@ pub enum InstructorAct
     Grader(GraderAct),
 
     // Instructors Only
-    /*
     #[structopt(about = "[instructors only] adds the listed students to the course")]
     AddStudents
+    {
+        #[structopt(name = "user names")]
+        user_names: Vec<OsString>,
+    },
+    #[structopt(about = "[instructors only] removes the listed students from the course")]
+    RemStudents
     {
         #[structopt(name = "user names")]
         user_names: Vec<OsString>,
@@ -57,6 +59,13 @@ pub enum InstructorAct
         #[structopt(name = "user names")]
         user_names: Vec<OsString>,
     },
+    #[structopt(about = "[instructors only] removes the listed graders from the course")]
+    RemGraders
+    {
+        #[structopt(name = "user names")]
+        user_names: Vec<OsString>,
+    },
+    /*
     #[structopt(about = "[instructors only] checks an assignment specification for validity")]
     Audit
     {
@@ -78,16 +87,37 @@ pub enum InstructorAct
 impl InstructorAct
 {
 
-    fn add_students(_user_names: &Vec<OsString>, _context: &Context) -> Result<(),FailLog>
+    fn add_students(user_names: &Vec<OsString>, context: &mut Context) -> Result<(),FailLog>
     {
-        todo!()
+        for name in user_names.iter() {
+            if ! context.students.contains(&mut name.clone()) {
+                context.students.push(name.clone());
+            }
+        }
+        context.sync_course_spec()
     }
 
-    fn add_graders(_user_names: &Vec<OsString>, _context: &Context) -> Result<(),FailLog>
+    fn remove_students(user_names: &Vec<OsString>, context: &mut Context) -> Result<(),FailLog>
     {
-        todo!()
+        context.students.retain(|os_str| ! user_names.contains(os_str) );
+        context.sync_course_spec()
     }
 
+    fn add_graders(user_names: &Vec<OsString>, context: &mut Context) -> Result<(),FailLog>
+    {
+        for name in user_names.iter() {
+            if ! context.graders.contains(&mut name.clone()) {
+                context.graders.push(name.clone());
+            }
+        }
+        Self::add_students(user_names,context)
+    }
+
+    fn remove_graders(user_names: &Vec<OsString>, context: &mut Context) -> Result<(),FailLog>
+    {
+        context.graders.retain(|os_str| ! user_names.contains(os_str) );
+        Self::remove_students(user_names,context)
+    }
 
     fn audit(_asgn_name: OsString, _context: &Context) -> Result<(),FailLog>
     {
@@ -102,13 +132,17 @@ impl InstructorAct
 
 
 
-    pub fn execute(&self, context: &Context) -> Result<(),FailLog>
+    pub fn execute(&self, context: &mut Context) -> Result<(),FailLog>
     {
         use InstructorAct::*;
         match self {
             Grader(act)            => act.execute(context),
             //Audit    { asgn_name } => Self::audit(asgn_name.clone(),context),
             //AuditAll {}            => Self::audit_all(context),
+            AddStudents {user_names} => Self::add_students(user_names,context),
+            RemStudents {user_names} => Self::remove_students(user_names,context),
+            AddGraders  {user_names} => Self::add_graders(user_names,context),
+            RemGraders  {user_names} => Self::remove_graders(user_names,context),
             Refresh  {}            => context.refresh(),
         }
     }

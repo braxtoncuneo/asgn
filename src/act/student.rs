@@ -1,5 +1,7 @@
 use structopt::StructOpt;
 use colored::Colorize;
+use super::other::OtherAct;
+use util::bashrc_append_line;
 
 use std::
 {
@@ -36,11 +38,8 @@ use crate::
 pub struct StudentCmd
 {
 
-    #[structopt(name = "instructor")]
-    instructor : OsString,
-
-    #[structopt(name = "course")]
-    course : OsString,
+    #[structopt(name = "base path")]
+    base_path : OsString,
 
     #[structopt(subcommand)]
     pub act: StudentAct,
@@ -52,7 +51,8 @@ pub struct StudentCmd
 #[structopt(rename_all = "snake")]
 pub enum StudentAct
 {
-
+    #[structopt(flatten)]
+    Other(OtherAct),
     // Everyone
     #[structopt(about = "submits assignments (or tells you why they cannot be submitted)")]
     Submit{
@@ -71,6 +71,11 @@ pub enum StudentAct
     },
     #[structopt(about = "summarizes information about submissions and currently visible assignments")]
     Summary{},
+    #[structopt(about = "\"installs\" an alias to your .bashrc")]
+    Alias{
+        #[structopt(name = "alias name")]
+        alias_name: OsString,
+    },
 }
 
 
@@ -286,14 +291,33 @@ impl StudentAct
         Ok(())
     }
 
+
+    fn alias(alias_name: &OsString, context: &Context) -> Result<(),FailLog>
+    {
+        let line = format!(
+            "alias {}=\"{} {}\"",
+            alias_name.to_string_lossy(),
+            context.exe_path.to_string_lossy(),
+            context.base_path.to_string_lossy()
+        );
+        bashrc_append_line(line)?;
+        println!("{}","Alias installed successfully.".yellow());
+        println!("{}","The alias will take effect automatically for future shell sessions.".yellow());
+        println!("{}","\nTo have it take effect for this shell session, run this command:".yellow());
+        println!("{}","\n\nsource ~/.bashrc\n\n".green());
+        Ok(())
+    }
+
     pub fn execute(&self, context: &Context) -> Result<(),FailLog>
     {
         use StudentAct::*;
         match self {
-            Submit  { asgn_name } => Self::submit (asgn_name,context),
-            Setup   { asgn_name } => Self::setup  (asgn_name,context),
-            Recover { asgn_name } => Self::recover(asgn_name,context),
-            Summary {}            => Self::summary(context),
+            Other(act)             => act.execute(context),
+            Submit  { asgn_name }  => Self::submit (asgn_name,context),
+            Setup   { asgn_name }  => Self::setup  (asgn_name,context),
+            Recover { asgn_name }  => Self::recover(asgn_name,context),
+            Summary {}             => Self::summary(context),
+            Alias   { alias_name } => Self::alias(alias_name,context),
         }
     }
 

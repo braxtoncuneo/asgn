@@ -9,7 +9,10 @@ use std::
         OsStr,
     },
     fs,
-    os::unix::fs::PermissionsExt,
+    os::unix::fs::{
+        PermissionsExt,
+        MetadataExt,
+    },
     path::
     {
         Path,
@@ -72,9 +75,9 @@ pub enum Role
 pub struct Context
 {
     // Determined through input
-    pub course      : OsString,
     pub instructor  : OsString,
     pub base_path   : PathBuf,
+    pub exe_path    : PathBuf,
 
     // Determined through system calls
     pub uid         : u32,
@@ -118,8 +121,37 @@ impl Context
                     format!("{}",err)
                 ).into()
             })
+    }
 
+    pub fn sync_course_spec(&self) -> Result<(),FailLog>
+    {
+        use FailInfo::*;
+        let course_file_path = self.base_path.join(".course.toml");
 
+        let convert = |vec : &Vec<OsString> | -> Vec<String> {
+            vec.iter()
+                .map(|os_str| -> String {
+                    OsStr::to_string_lossy(os_str).to_string()
+                })
+                .collect()
+        };
+
+        let course_toml = CourseToml {
+            manifest: convert(&self.manifest),
+            graders:  convert(&self.graders),
+            students: convert(&self.students)
+        };
+    
+        let toml_text = toml::to_string(&course_toml)
+            .map_err(|err| IOFail(format!(
+                "Could not serialize course spec : {}",
+                err
+            )).into_log())?;
+
+        util::write_file(
+            course_file_path,
+            toml_text
+        )
     }
 
 
@@ -133,23 +165,27 @@ impl Context
         }
     }
 
-    pub fn deduce(instructor: OsString, course: OsString) -> Result<Self,FailLog>
+    pub fn deduce(base_path: OsString) -> Result<Self,FailLog>
     {
+        let base_path : PathBuf = base_path.into();
         let uid  : u32      = get_current_uid();
         let user : OsString = get_user_by_uid(uid)
                 .ok_or(FailInfo::InvalidUID() )?.name().into();
 
         let cwd = current_dir()
                 .map_err(|_| FailInfo::InvalidCWD() )?;
-
-        let base_path = PathBuf::from("/home/fac")
-                .join(&instructor)
-                .join("submit")
-                .join(&course);
+        
+        let exe_path = std::fs::read_link("/proc/self/exe")
+            .map_err(|err| -> FailLog {FailInfo::IOFail(err.to_string()).into()})?;
 
         if ! base_path.is_dir() {
             return Err(FailInfo::NoBaseDir(base_path).into());
         }
+
+        let instructor_uid = std::fs::metadata(&base_path)
+            .map_err(|err| FailInfo::IOFail(format!("{}",err)))?.uid();
+        let instructor : OsString = get_user_by_uid(instructor_uid)
+                .ok_or(FailInfo::InvalidUID() )?.name().into();
 
         let time = Local::now();
 
@@ -173,9 +209,9 @@ impl Context
         }
 
         let mut context = Self {
-            course,
             instructor,
             base_path,
+            exe_path,
             uid,
             user,
             time,
@@ -339,7 +375,7 @@ impl Context
                         user  : grad.clone(),
                         read  : true,
                         write : false,
-                        exe   : false,
+                        exe   : true,
                     };
                     facl_list.push(grad_entry);
                 }
