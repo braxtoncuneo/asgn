@@ -2,7 +2,10 @@ use dirs;
 
 use std::
 {
-    ffi::OsString,
+    ffi::{
+        OsString,
+        OsStr,
+    },
     fs::
     {
         self,
@@ -34,6 +37,28 @@ use crate::
         FailLog,
     }
 };
+
+use termion::terminal_size;
+use colored::Colorize;
+use walkdir::WalkDir;
+
+pub fn print_hline () {
+    if let Ok((w,_h)) = terminal_size() {
+        println!("{:-<1$}","",w as usize);
+    } else {
+        println!("");
+    }
+}
+
+
+pub fn print_bold_hline () {
+    if let Ok((w,_h)) = terminal_size() {
+        println!("{}",format!("{:=<1$}","",w as usize).bold());
+    } else {
+        println!("");
+    }
+}
+
 
 
 pub fn run_at
@@ -76,7 +101,7 @@ pub fn set_mode
 <P : AsRef<Path> >
 (path: P, mode: u32) -> Result<(),FailLog>
 {
-    
+
     let mut cmd = std::process::Command::new("chmod");
     cmd.arg(format!("{:o}",mode));
     cmd.arg(path.as_ref());
@@ -111,7 +136,7 @@ impl ToString for FaclEntry{
         let read  = if self.read  { "r" } else { "" };
         let write = if self.write { "w" } else { "" };
         let exe   = if self.exe   { "x" } else { "" };
-        
+
         user + ":" + read + write + exe
     }
 }
@@ -150,7 +175,7 @@ pub fn set_facl
     if ! output.status.success() {
         return Err(FailInfo::IOFail(stderr.to_string_lossy().to_string()).into())
     }
-        
+
     Ok(())
 }
 
@@ -186,7 +211,7 @@ pub fn refresh_file
                 FailInfo::IOFail(format!("removing directory {} : {}",path.display(),err)).into()
             })?;
     }
-    
+
     if ! path.exists() {
         fs::write(path,default_text)
             .map_err(|err| -> FailLog {
@@ -235,6 +260,22 @@ pub fn refresh_dir
 }
 
 
+pub fn recursive_refresh_dir
+<'facl, P: AsRef<Path> + Clone, E: Iterator<Item=&'facl FaclEntry> + Clone >
+(
+    path: P,
+    mode: u32,
+    facl: E,
+) -> Result<(),FailLog>
+{
+    refresh_dir(path.clone(),mode,facl.clone())?;
+    for maybe_entry in WalkDir::new(path)
+    {
+        let  dir_entry= maybe_entry.map_err(|err| FailInfo::IOFail(format!("{}",err)).into_log())?;
+        refresh_dir(dir_entry.path(),mode,facl.clone())?;
+    }
+    Ok(())
+}
 
 pub fn bashrc_append_line
 <L : AsRef<str> + std::fmt::Display>
@@ -251,6 +292,43 @@ pub fn bashrc_append_line
     writeln!(bashrc,"{}",line)
         .map_err(|err| IOFail(format!("{}",err)))?;
     Ok(())
+}
+
+
+pub fn stringify_osstr_vec(vec: &Vec<OsString>) -> Vec<String> {
+    vec.iter()
+        .map(|os_str| -> String {
+            OsStr::to_string_lossy(os_str).to_string()
+        })
+        .collect()
+}
+
+pub fn osify_string_vec(vec: &Vec<String>) -> Vec<OsString> {
+    vec.iter()
+        .map(|string| -> OsString {
+            OsString::from(string)
+        })
+        .collect()
+}
+
+
+pub fn make_fresh_dir(path : &Path, base_name : &str)
+    -> PathBuf
+{
+    let mut idx : Option<usize> = None;
+
+    let gen_path = |idx: Option<usize>| {
+        if let Some(idx) =idx {
+            path.join(format!("{}.{}",base_name,idx))
+        } else {
+            path.join(base_name)
+        }
+    };
+
+    while gen_path(idx).exists() {
+        idx = idx.map(|i|i+1).or(Some(0));
+    }
+    gen_path(idx)
 }
 
 

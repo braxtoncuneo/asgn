@@ -13,7 +13,9 @@ use std::
     path::
     {
         PathBuf,
+        Path,
     },
+    process::Stdio,
     os::unix::fs::MetadataExt,
 };
 
@@ -27,11 +29,13 @@ use serde_derive::
 use chrono::
 {
     DateTime,
+    Datelike,
     Local,
     TimeZone,
     Duration,
 };
 
+use users::get_user_by_uid;
 
 use toml;
 
@@ -40,21 +44,52 @@ use crate::{
         FailInfo,
         FailLog,
     },
-    context::Context,
+    context::{
+        Context,
+        Role,
+    },
+    util,
+    table::Table,
 };
 
+use colored::Colorize;
 
+#[derive(Serialize,Deserialize,Clone,Debug)]
+pub struct Rule {
+    pub target : String,
+    pub fail_okay : Option<bool>,
+    pub wait_text : Option<String>,
+    pub pass_text : Option<String>,
+    pub fail_text : Option<String>,
+    pub help_text : Option<String>,
+    pub kind      : Option<String>,
+}
+
+#[derive(Serialize,Deserialize,Clone,Debug)]
+pub struct Ruleset {
+    pub on_grade  : Option<bool>,
+    pub on_submit : Option<bool>,
+    pub fail_okay : Option<bool>,
+    pub rules     : Vec<Rule>,
+}
 
 
 
 #[derive(Serialize,Deserialize)]
 pub struct AsgnSpecToml
 {
-    name      : String,
-    active    : bool,
-    visible   : bool,
-    deadline  : toml::value::Datetime,
-    file_list : Vec<String>,
+    name       : String,
+    active     : bool,
+    visible    : bool,
+    due_date   : toml::value::Datetime,
+    open_date  : Option<toml::value::Datetime>,
+    close_date : Option<toml::value::Datetime>,
+    file_list  : Vec<String>,
+
+    build : Option<Ruleset>,
+    grade : Option<Ruleset>,
+    check : Option<Ruleset>,
+    score : Option<Ruleset>,
 }
 
 impl Default for AsgnSpecToml
@@ -67,18 +102,24 @@ impl Default for AsgnSpecToml
             day   : 1,
         };
 
-        let deadline = toml::value::Datetime {
+        let due_date = toml::value::Datetime {
             date   : Some(date),
             time   : None,
             offset : None,
         };
 
         Self {
-            name      : "<put name here>".to_string(),
-            active    : false,
-            visible   : false,
-            deadline,
-            file_list : Vec::new(),
+            name       : "<put name here>".to_string(),
+            active     : false,
+            visible    : false,
+            due_date,
+            open_date  : None,
+            close_date : None,
+            file_list  : Vec::new(),
+            build : None,
+            check : None,
+            grade : None,
+            score : None,
         }
     }
 }
@@ -86,7 +127,7 @@ impl Default for AsgnSpecToml
 
 impl AsgnSpecToml
 {
- 
+
     pub fn default_with_name <S: AsRef<OsStr>> (name : S) -> Self {
         let mut result : Self = Default::default();
         result.name = name.as_ref().to_string_lossy().to_string();
@@ -100,25 +141,33 @@ impl AsgnSpecToml
 
 pub struct AsgnSpec
 {
-    pub name      : String,
-    pub active    : bool,
-    pub visible   : bool,
-    pub deadline  : DateTime<Local>,
-    pub file_list : Vec<OsString>,
+    pub name       : String,
+    pub active     : bool,
+    pub visible    : bool,
+    pub due_date   : DateTime<Local>,
+    pub open_date  : Option<DateTime<Local>>,
+    pub close_date : Option<DateTime<Local>>,
+    pub file_list  : Vec<OsString>,
+    pub build      : Option<Ruleset>,
+    pub grade      : Option<Ruleset>,
+    pub check      : Option<Ruleset>,
+    pub score      : Option<Ruleset>,
+    pub path       : PathBuf,
 }
 
 
-impl TryFrom<AsgnSpecToml> for AsgnSpec
-{
-    type Error = FailLog;
 
-    fn try_from(spec_toml: AsgnSpecToml) -> Result<Self,Self::Error> {
-        let deadline = match spec_toml.deadline.date {
+
+impl AsgnSpec
+{
+
+    pub fn date_into_chrono(deadline : toml::value::Datetime) -> Result<chrono::DateTime<Local>,FailLog> {
+        match deadline.date {
             Some(date) => {
                 let y : i32 = date.year  as i32;
                 let m : u32 = date.month as u32;
                 let d : u32 = date.day   as u32;
-                chrono::offset::Local.with_ymd_and_hms(y,m,d,23,59,59).unwrap()
+                Ok(chrono::offset::Local.with_ymd_and_hms(y,m,d,23,59,59).unwrap())
             },
             None       => {
                 return Err(FailInfo::BadSpec(
@@ -126,33 +175,27 @@ impl TryFrom<AsgnSpecToml> for AsgnSpec
                     String::from("Date data missing from deadline field.")
                 ).into())
             },
-        };
-        let mut file_list = Vec::<OsString>::new();
-        for filename in spec_toml.file_list.iter()
-        {
-            file_list.push(OsString::from(filename));
         }
-
-        Ok(Self {
-            name     : spec_toml.name,
-            active   : spec_toml.active,
-            visible  : spec_toml.visible,
-            deadline,
-            file_list,
-        })
-
     }
-}
+
+    pub fn date_from_chrono(deadline : chrono::DateTime<Local>) -> toml::value::Datetime{
+        let naive = deadline.date_naive();
+        toml::value::Datetime {
+            date: Some(toml::value::Date{
+                year  : naive.year()  as u16,
+                month : naive.month() as u8,
+                day   : naive.day()   as u8,
+            }),
+            time: None,
+            offset: None,
+        }
+    }
 
 
-impl AsgnSpec
-{
-
-
-    pub fn new(path : PathBuf) -> Result<Self,FailLog>
+    pub fn load <P : AsRef<Path>> (path : P) -> Result<Self,FailLog>
     {
-
-        let spec_path = path.join(".spec");
+        let path : &Path = path.as_ref();
+        let spec_path = path.join(".info");
         let info_path = spec_path.join("info.toml");
 
         //println!("{}",info_path.display());
@@ -165,7 +208,7 @@ impl AsgnSpec
                 ).into()
             })?;
 
-        let info_toml : AsgnSpecToml = toml::from_str(&info_text)
+        let spec_toml : AsgnSpecToml = toml::from_str(&info_text)
             .map_err(|err| -> FailLog {
                 FailInfo::BadSpec(
                     "assignment".to_string(),
@@ -173,38 +216,328 @@ impl AsgnSpec
                 ).into()
             })?;
 
-        info_toml.try_into()
-            .and_then(|spec : AsgnSpec | -> Result<Self,FailLog> {
-                if ! path.ends_with(&spec.name) {
-                    Err(FailInfo::BadSpec(
-                        "assignment".to_string(),
-                        String::from("Name field does not match assignment directory name.")
-                    ).into())
-                } else {
-                    Ok(spec)
-                }
-            })
+        let open_date = if let Some(date) = spec_toml.open_date {
+            Some(Self::date_into_chrono(date)?)
+        } else {
+            None
+        };
+
+        let close_date = if let Some(date) = spec_toml.close_date {
+            Some(Self::date_into_chrono(date)?)
+        } else {
+            None
+        };
+
+        let due_date = Self::date_into_chrono(spec_toml.due_date)?;
+
+        let spec = AsgnSpec {
+            name       : spec_toml.name,
+            active     : spec_toml.active,
+            visible    : spec_toml.visible,
+            due_date,
+            open_date,
+            close_date,
+            file_list  : util::osify_string_vec(&spec_toml.file_list),
+            build      : spec_toml.build,
+            check      : spec_toml.check,
+            grade      : spec_toml.grade,
+            score      : spec_toml.score,
+            path       : PathBuf::from(path),
+        };
+
+        if ! path.ends_with(&spec.name) {
+            Err(FailInfo::BadSpec(
+                "assignment".to_string(),
+                String::from("Name field does not match assignment directory name.")
+            ).into())
+        } else {
+            Ok(spec)
+        }
 
     }
 
-    pub fn default_makefile <F: std::fmt::Display> (name: F) -> String {
-        format!(
-           "\nflags =  -Wall -Werror -pedantic -std=c++11\
-            \nfile = {name}\
-            \n\
-            \n$(file): $(file).cpp\
-            \n\tg++ -fdiagnostics-color=always $(file).cpp -o $(file) $(flags)\
-            \n\
-            \nformat: $(file).cpp\
-            \n\t@clang-format -i $(file).cpp\
-            \n\
-            \nstyle: $(file).cpp\
-            \n\t@clang-tidy --use-color --fix --quiet $(file).cpp -- $(flags) -include \"iostream\"\
-            \n\
-            \ntest: $(file).cpp\
-            \n\t@echo \"No automated tests provided for this assignment.\""
+    pub fn sync (&self) -> Result<(),FailLog>{
+        use FailInfo::*;
+
+        let spec_toml = AsgnSpecToml {
+            name       : self.name.clone(),
+            active     : self.active,
+            visible    : self.visible,
+            due_date   : Self::date_from_chrono(self.due_date),
+            open_date  : self.open_date.map(Self::date_from_chrono),
+            close_date : self.close_date.map(Self::date_from_chrono),
+            file_list  : util::stringify_osstr_vec(&self.file_list),
+            build : self.build.clone(),
+            check : self.check.clone(),
+            grade : self.grade.clone(),
+            score : self.score.clone(),
+        };
+
+        let toml_text = toml::to_string(&spec_toml)
+            .map_err(|err| IOFail(format!(
+                "Could not serialize course spec : {}",
+                err
+            )).into_log())?;
+
+        util::write_file(
+            self.path.join(".info").join("info.toml"),
+            toml_text
         )
     }
+
+
+    pub fn before_open(&self) -> bool {
+        self.open_date.map(|date| {
+            Local::now().checked_add_days(chrono::naive::Days::new(1)).unwrap()
+            .signed_duration_since(date) < chrono::Duration::zero()
+        }).unwrap_or(false)
+    }
+
+    pub fn after_close(&self) -> bool {
+        self.close_date.map(|date| {
+            Local::now().signed_duration_since(date) > chrono::Duration::zero()
+        }).unwrap_or(false)
+    }
+
+    pub fn details(&self, context: &Context) -> Result<String,FailLog> {
+
+        let sub_dir = context.base_path.join(&self.name).join(&context.user);
+
+        let slot = SubmissionSlot {
+            context:   context,
+            asgn_spec: self,
+            base_path: sub_dir,
+        };
+
+        let status = slot.status().unwrap();
+
+        let mut table = Table::new(2);
+        table.add_row(vec!["PROPERTY".to_string(),"VALUE".to_string()])?;
+        table.add_row(vec![
+            "NAME".to_string(),
+            self.name.clone(),
+        ])?;
+        table.add_row(vec![
+            "FILES".to_string(),
+            self.file_list.iter()
+                .enumerate()
+                .fold(String::new(),|acc,(idx,val)| {
+                    if idx == 0 {
+                        val.to_string_lossy().to_string()
+                    } else {
+                        acc + "  " + &val.to_string_lossy()
+                    }
+                }),
+        ])?;
+        table.add_row(vec![
+            "OPEN DATE".to_string(),
+            self.open_date.map(|d|d.to_string()).unwrap_or("NONE".to_string()),
+        ])?;
+        table.add_row(vec![
+            "CLOSE DATE".to_string(),
+            self.close_date.map(|d|d.to_string()).unwrap_or("NONE".to_string()),
+        ])?;
+        table.add_row(vec![
+            "DUE DATE".to_string(),
+            self.due_date.to_string(),
+        ])?;
+        table.add_row(vec![
+            "EXTENSION".to_string(),
+            status.extension_days.to_string(),
+        ])?;
+        table.add_row(vec![
+            "GRACE".to_string(),
+            status.grace_days.to_string(),
+        ])?;
+
+        Ok(table.as_table())
+    }
+
+    pub fn make_command(&self, target: &str, quiet: bool) -> std::process::Command {
+        let path = self.path.join(".info").join("Makefile");
+        let mut cmd  = std::process::Command::new("make");
+        if quiet {
+            cmd.arg("--quiet");
+        }
+        cmd.arg(format!("--file={}",path.display()));
+        cmd.arg(target);
+        cmd
+    }
+
+
+    pub fn run_rule(&self, context: &Context, rule: &Rule, path: &Path) -> Result<bool,()>
+    {
+        let wait_text = rule.wait_text.as_ref()
+            .unwrap_or(&format!("Executing '{}'.",&rule.target))
+            .yellow().bold();
+        println!("{}",wait_text);
+
+        let quiet = match context.role {
+            Role::Instructor => false,
+            Role::Grader     => false,
+            Role::Student    => true,
+            Role::Other      => true,
+        };
+
+        let mut cmd = self.make_command(rule.target.as_ref(),quiet);
+        cmd.stdout(Stdio::inherit());
+        cmd.stderr(Stdio::inherit());
+
+        let (status,_out,_err) = util::run_at(cmd,&path,false).map_err(|_|())?;
+
+        if status.success() {
+            let pass_text = rule.pass_text.clone()
+                .unwrap_or(format!("'{}' passed.",&rule.target));
+            let pass_text = format!("! {}", pass_text)
+                .green();
+            println!("{}",pass_text);
+            Ok(true)
+        } else {
+            let fail_text = rule.fail_text.clone()
+                .unwrap_or(format!("'{}' failed.",&rule.target));
+            let pass_text = format!("! {}", fail_text)
+                .red();
+            let help_text = rule.help_text.as_ref().map(|t|t.yellow().to_string());
+            if ! rule.fail_okay.unwrap_or(false) {
+                println!("{}",fail_text);
+                if let Some(help) = help_text {
+                    println!("> {}",help.yellow());
+                }
+                Err(())
+            } else {
+                println!("{}",fail_text);
+                if let Some(help) = help_text {
+                    println!("  > {}",help.yellow());
+                }
+                Ok(false)
+            }
+        }
+    }
+
+
+    pub fn run_ruleset(&self, context: &Context, ruleset : Option<&Ruleset>, path: &Path) -> Result<(),()>
+    {
+        if ruleset.is_none() {
+            println!("{}","No targets.".yellow());
+            return Ok(())
+        }
+
+        let rules = ruleset.as_ref().unwrap();
+
+        let count       = rules.rules.iter().count();
+        let mut passed  = 0usize;
+        let mut failed  = 0usize;
+        let mut fatal   = false;
+        for rule in rules.rules.iter() {
+            let mut rule = rule.clone();
+            rule.fail_okay.get_or_insert(rules.fail_okay.unwrap_or(false));
+            util::print_hline();
+            match self.run_rule(context,&rule,path) {
+                Ok(pass) => {
+                    if pass {
+                        passed += 1;
+                    } else {
+                        failed += 1;
+                    }
+                },
+                Err(()) => {
+                    failed += 1;
+                    fatal = true;
+                    break;
+                }
+            }
+        }
+        if fatal {
+            println!("{}",format!("! {}","Execution cannot continue beyond this error.").red())
+        }
+        util::print_hline();
+        println!("{} - {}, {}, {}.",
+            format!("! {} total targets",count),
+            format!("{} passed",passed),
+            format!("{} failed",failed),
+            format!("{} not reached",count-passed-failed)
+        );
+        Ok(())
+    }
+
+
+    pub fn run_on_submit(&self, context: &Context, ruleset : Option<&Ruleset>, path: &Path, title: &str)
+    -> bool
+    {
+        if let Some(set) = ruleset {
+            if set.on_submit.unwrap_or(true) {
+                util::print_bold_hline();
+                println!("{}",title.yellow().bold());
+                if self.run_ruleset(context,Some(set),path).is_err() {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    pub fn run_on_grade(&self, context: &Context, ruleset : Option<&Ruleset>, path: &Path, title: &str)
+    -> bool
+    {
+        if let Some(set) = ruleset {
+            if set.on_grade.unwrap_or(true) {
+                util::print_bold_hline();
+                println!("{}",title.yellow().bold());
+                if self.run_ruleset(context,Some(set),path).is_err() {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    pub fn retrieve_sub(&self, dst_dir : &Path, user_name : &str)
+    -> Result<(),FailLog>
+    {
+
+        let sub_path = self.path.join(user_name);
+
+        if dst_dir.is_dir() {
+            fs::remove_dir_all(&dst_dir)
+                .map_err(|err| {
+                    FailInfo::IOFail(format!("could not remove directory {} : {}",dst_dir.display(),err)).into_log()
+                })?;
+        }
+        if dst_dir.is_file() {
+            fs::remove_file(&dst_dir)
+                .map_err(|err| {
+                    FailInfo::IOFail(format!("could not remove file {} : {}",dst_dir.display(),err)).into_log()
+                })?;
+        }
+        fs::create_dir(&dst_dir)
+            .map_err(|err| {
+                FailInfo::IOFail(format!("could not create directory {} : {}",dst_dir.display(),err)).into_log()
+            })?;
+
+        for file_name in self.file_list.iter() {
+            let src_path = sub_path.join(file_name);
+            let dst_path = dst_dir .join(file_name);
+            if src_path.is_dir() {
+                continue;
+            }
+            if ! src_path.exists() {
+                return Err(FailInfo::Custom(
+                        format!("could not copy file {} to {}",
+                        (&src_path).display(),(&dst_path).display()),
+                        format!("File does not exist in the submission directory.")
+                    ).into_log());
+            }
+            fs::copy(&src_path,&dst_path)
+                .map_err(|err| {
+                    FailInfo::IOFail(
+                        format!("could not copy file {} to {} : {}",
+                        (&src_path).display(),(&dst_path).display(),err)
+                    ).into_log()
+                })?;
+        }
+        Ok(())
+    }
+
 
 
 }
@@ -220,7 +553,7 @@ pub struct SubmissionSlot <'ctx>
 pub struct SubmissionStatus
 {
     pub turn_in_time   : Option<DateTime<Local>>,
-    pub bonus_days     : i64,
+    pub grace_days     : i64,
     pub extension_days : i64,
 }
 
@@ -229,7 +562,7 @@ pub struct SubmissionStatus
 
 
 #[derive(Serialize,Deserialize)]
-struct BonusToml
+struct GraceToml
 {
     pub value : i64,
 }
@@ -244,9 +577,9 @@ struct ExtensionToml
 impl <'ctx> SubmissionSlot<'ctx>
 {
 
-    pub fn bonus_path(&self) -> PathBuf
+    pub fn grace_path(&self) -> PathBuf
     {
-        self.base_path.join(".bonus")
+        self.base_path.join(".grace")
     }
 
     pub fn extension_path(&self) -> PathBuf
@@ -261,32 +594,32 @@ impl <'ctx> SubmissionSlot<'ctx>
             .collect()
     }
 
-    pub fn get_bonus(&self) -> Result<i64,FailLog>
+    pub fn get_grace(&self) -> Result<i64,FailLog>
     {
-        let toml_text = read_to_string(self.bonus_path())
+        let toml_text = read_to_string(self.grace_path())
             .map_err(|err| -> FailLog {
-                FailInfo::IOFail(format!("reading bonus file : {}",err)).into()
+                FailInfo::IOFail(format!("reading grace file : {}",err)).into()
             });
         if toml_text.is_err() {
             return Ok(0);
         }
-        let bonus : BonusToml = toml::from_str(&toml_text.unwrap())
+        let grace : GraceToml = toml::from_str(&toml_text.unwrap())
             .map_err(|err| -> FailLog {
-                FailInfo::IOFail(format!("deserializing bonus file : {}",err)).into()
+                FailInfo::IOFail(format!("deserializing grace file : {}",err)).into()
             })?;
-        Ok(bonus.value)
+        Ok(grace.value)
     }
 
-    pub fn set_bonus(&self, value: i64) -> Result<(),FailLog>
+    pub fn set_grace(&self, value: i64) -> Result<(),FailLog>
     {
-        let bonus_toml = BonusToml { value };
-        let toml_text  = toml::to_string(&bonus_toml)
+        let grace_toml = GraceToml { value };
+        let toml_text  = toml::to_string(&grace_toml)
             .map_err( |err| -> FailLog {
-                FailInfo::IOFail(format!("serializing bonus file : {}",err)).into()
+                FailInfo::IOFail(format!("serializing grace file : {}",err)).into()
             })?;
-        fs::write(self.bonus_path(),toml_text)
+        fs::write(self.grace_path(),toml_text)
             .map_err(|err| -> FailLog {
-                FailInfo::IOFail(format!("writing bonus file : {}",err)).into()
+                FailInfo::IOFail(format!("writing grace file : {}",err)).into()
             })?;
         Ok(())
     }
@@ -302,6 +635,18 @@ impl <'ctx> SubmissionSlot<'ctx>
             return Ok(0);
         }
 
+        let owner_uid = std::fs::metadata(&ext_path)
+            .map_err(|err| FailInfo::IOFail(format!("{}",err)))?.uid();
+        let owner : OsString = get_user_by_uid(owner_uid)
+            .ok_or(FailInfo::InvalidUID() )?.name().into();
+
+        if owner != self.context.instructor {
+            return Err(FailInfo::IOFail(format!(
+                    "Extension file at {} was not made by instructor!",
+                    ext_path.display())
+                ).into());
+        }
+
         let toml_text = read_to_string(ext_path)
             .map_err(|err| -> FailLog {
                 FailInfo::IOFail(format!("reading extension file : {}",err)).into()
@@ -310,20 +655,18 @@ impl <'ctx> SubmissionSlot<'ctx>
             .map_err(|err| -> FailLog {
                 FailInfo::IOFail(format!("deserializing extension file : {}",err)).into()
             })?;
-        
+
         Ok(ext.value)
-    } 
+    }
 
     pub fn set_extension(&self, value: i64) -> Result<(),FailLog>
     {
-        let _ext_path = self.extension_path();
-
         let ext_toml = ExtensionToml { value };
         let toml_text  = toml::to_string(&ext_toml)
             .map_err( |err| -> FailLog {
                 FailInfo::IOFail(format!("serializing extension file : {}",err)).into()
             })?;
-        fs::write(self.bonus_path(),toml_text)
+        fs::write(self.extension_path(),toml_text)
             .map_err(|err| -> FailLog {
                 FailInfo::IOFail(format!("writing extension file : {}",err)).into()
             })?;
@@ -341,7 +684,7 @@ impl <'ctx> SubmissionSlot<'ctx>
             for path in self.file_paths().into_iter() {
                 let meta = fs::metadata(path)
                     .map_err(|err|{
-                       FailInfo::IOFail(format!("{}",err.kind())).into_log() 
+                       FailInfo::IOFail(format!("{}",err.kind())).into_log()
                     })?;
                 mtime = mtime.max(meta.mtime());
             }
@@ -361,16 +704,12 @@ impl <'ctx> SubmissionSlot<'ctx>
 
         Ok(SubmissionStatus {
             turn_in_time,
-            bonus_days     : self.get_bonus()?,
+            grace_days     : self.get_grace()?,
             extension_days : self.get_extension()?,
         })
     }
 
 
-    pub fn refresh(self)
-    {
-        todo!()
-    }
 
 }
 
@@ -378,8 +717,9 @@ impl <'ctx> SubmissionSlot<'ctx>
 impl SubmissionStatus {
 
     pub fn time_past(&self,time: &DateTime<Local>) -> Option<Duration> {
-        let difference = self.turn_in_time?.signed_duration_since(*time);
-        return Some(difference)
+        Some(self.turn_in_time?
+            .signed_duration_since(*time))
+            //.checked_add(&chrono::Duration::days(1))
     }
 
     pub fn versus(&self,time: &DateTime<Local>) -> String {
@@ -387,7 +727,8 @@ impl SubmissionStatus {
         let late_by = self.time_past(time);
 
         if late_by.is_none() {
-            let time_diff = chrono::offset::Local::now().signed_duration_since(*time);
+            let time_diff = chrono::offset::Local::now()
+                .signed_duration_since(*time);
             if time_diff.num_seconds() <= 0 {
                 return String::from("Not Submitted");
             } else {
@@ -405,7 +746,7 @@ impl SubmissionStatus {
         total += hours;
         total *= 60;
         let mins : i64 = late_by.num_minutes() - total;
-        
+
         if late_by.num_seconds() > 0 {
             format!("Late {}d {}h {}m",days,hours,mins)
         } else {

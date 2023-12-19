@@ -5,7 +5,7 @@ use std::
 {
     ffi::OsString,
     fs,
-    process::Command,
+    path::Path,
 };
 
 use crate::
@@ -17,11 +17,10 @@ use crate::
         FailInfo,
         FailLog,
     },
-    util::
-    {
-        self,
-    },
+    util,
 };
+
+use colored::Colorize;
 
 #[derive(Debug,StructOpt)]
 #[structopt(
@@ -50,24 +49,26 @@ pub enum GraderAct
     Student(StudentAct),
 
     // Instructors and Graders
-    /*
-    #[structopt(about = "[graders only] runs checks for a specific submission")]
+    #[structopt(about = "[graders only] runs build rules for a specific assignment, using the current working directory as the location of the submission")]
+    Build
+    {
+        #[structopt(name = "assignment name")]
+        asgn_name: OsString,
+    },
+    #[structopt(about = "[graders only] run grade rules for a specific assignment, using the current working directory as the location of the submission")]
+    Grade
+    {
+        #[structopt(name = "assignment name")]
+        asgn_name: OsString,
+    },
+    #[structopt(about = "[graders only] runs check rules for a specific assignment, using the current working directory as the location of the submission")]
     Check
     {
         #[structopt(name = "assignment name")]
         asgn_name: OsString,
-        #[structopt(name = "student user name")]
-        stud_name: OsString,
     },
-    #[structopt(about = "[graders only] runs checks for all submissions of a specific assignment")]
-    CheckAll
-    {
-        #[structopt(name = "assignment name")]
-        asgn_name: OsString,
-    },
-    */
-    #[structopt(about = "[graders only] runs tests for assignment in current working directory")]
-    Test
+    #[structopt(about = "[graders only] runs score rules for a specific assignment, using the current working directory as the location of the submission")]
+    Score
     {
         #[structopt(name = "assignment name")]
         asgn_name: OsString,
@@ -93,163 +94,107 @@ pub enum GraderAct
 impl GraderAct
 {
 
-    fn check(_asgn_name: &OsString, _user_name: &OsString, _context: &Context) -> Result<(),FailLog>
-    {
-        todo!()
-    }
-
-    fn check_all(_asgn_name: &OsString, _context: &Context) -> Result<(),FailLog>
-    {
-        todo!()
-    }
 
 
-    fn test_local(asgn_name: &OsString, context: &Context) -> Result<(),FailLog>
+    fn build(asgn_name: &OsString, context: &Context) -> Result<(),FailLog>
     {
         let spec : &AsgnSpec = context.catalog.get(asgn_name)
             .ok_or(FailInfo::InvalidAsgn(asgn_name.clone()).into_log())?
             .as_ref().map_err(|err| err.clone() )?;
 
         let cwd = context.cwd.clone();
-        util::run_at(context.test_command(spec),&cwd,true)?;
+        spec.run_ruleset(context,spec.build.as_ref(),&cwd).is_err();
+
+        Ok(())
+    }
+
+    fn grade(asgn_name: &OsString, context: &Context) -> Result<(),FailLog>
+    {
+        let spec : &AsgnSpec = context.catalog.get(asgn_name)
+            .ok_or(FailInfo::InvalidAsgn(asgn_name.clone()).into_log())?
+            .as_ref().map_err(|err| err.clone() )?;
+        let cwd = context.cwd.clone();
+        
+        if ! spec.run_on_grade(context,spec.check.as_ref(),&cwd,"Evaluating Checks") {
+            return Ok(());
+        }
+        
+        if ! spec.run_on_grade(context,spec.score.as_ref(),&cwd,"Evaluating Scores") {
+            return Ok(());
+        }
+
+        util::print_bold_hline();
+        println!("{}","Evaluating Grades".yellow().bold());
+        spec.run_ruleset(context,spec.grade.as_ref(),&cwd).is_err();
+        
+        util::print_bold_hline();
+
+        Ok(())
+    }
+
+    fn check(asgn_name: &OsString, context: &Context) -> Result<(),FailLog>
+    {
+        let spec : &AsgnSpec = context.catalog.get(asgn_name)
+            .ok_or(FailInfo::InvalidAsgn(asgn_name.clone()).into_log())?
+            .as_ref().map_err(|err| err.clone() )?;
+
+        let cwd = context.cwd.clone();
+        spec.run_ruleset(context,spec.check.as_ref(),&cwd).is_err();
+
+        Ok(())
+    }
+
+    fn score(asgn_name: &OsString, context: &Context) -> Result<(),FailLog>
+    {
+        let spec : &AsgnSpec = context.catalog.get(asgn_name)
+            .ok_or(FailInfo::InvalidAsgn(asgn_name.clone()).into_log())?
+            .as_ref().map_err(|err| err.clone() )?;
+
+        let cwd = context.cwd.clone();
+        spec.run_ruleset(context,spec.score.as_ref(),&cwd).is_err();
 
         Ok(())
     }
 
 
-    fn copy(asgn_name: &OsString, user_name: &OsString, context: &Context) -> Result<(),FailLog>
+    fn copy(asgn_name: &OsString, user_name: &OsString, dst_dir : Option<&Path>, context: &Context)
+    -> Result<(),FailLog>
     {
 
         let spec : &AsgnSpec = context.catalog.get(asgn_name)
             .ok_or(FailInfo::InvalidAsgn(asgn_name.clone()).into_log())
             ?.as_ref().map_err(|err| err.clone() )?;
-        let sub_path = context.base_path.join(asgn_name).join(user_name);
 
-
-
-        let dst_dir = context.cwd.join(user_name);
-        if dst_dir.is_dir() {
-            fs::remove_dir_all(&dst_dir)
-                .map_err(|err| {
-                    FailInfo::IOFail(format!("could not remove directory {} : {}",dst_dir.display(),err)).into_log()
-                })?;
-        }
-        if dst_dir.is_file() {
-            fs::remove_file(&dst_dir)
-                .map_err(|err| {
-                    FailInfo::IOFail(format!("could not remove file {} : {}",dst_dir.display(),err)).into_log()
-                })?;
-        }
-        fs::create_dir(&dst_dir)
-            .map_err(|err| {
-                FailInfo::IOFail(format!("could not create directory {} : {}",dst_dir.display(),err)).into_log()
-            })?;
+        let dst_dir = dst_dir.unwrap_or(&context.cwd);
         
-        for file_name in spec.file_list.iter() {
-            let src_path = sub_path.join(file_name);
-            let dst_path = dst_dir .join(file_name);
-            if src_path.is_dir() {
-                continue;
-            }
-            fs::copy(&src_path,&dst_path)
-                .map_err(|err| {
-                    FailInfo::IOFail(format!("could not copy file {} to {} : {}",
-                    (&src_path).display(),(&dst_path).display(),err)).into_log()
-                })?;
-        }
-            
-        let src_format_path = context.base_path.join(".clang-format");
-        let src_style_path  = context.base_path.join(".clang-tidy");
-        let dst_format_path = dst_dir.join(".clang-format");
-        let dst_style_path  = dst_dir.join(".clang-tidy");
-        fs::copy(&src_format_path,&dst_format_path)
-            .map_err(|err| {
-                FailInfo::IOFail(format!("could not copy format file {} to {} : {}",
-                (&src_format_path).display(),(&dst_format_path).display(),err)).into_log()
-            })?;
-        fs::copy(&src_style_path,&dst_style_path)
-            .map_err(|err| {
-                FailInfo::IOFail(format!("could not copy style file {} to {} : {}",
-                (&src_style_path).display(),(&dst_style_path).display(),err)).into_log()
-            })?;
+        let dst_dir = util::make_fresh_dir(dst_dir,&user_name.to_string_lossy());
+        
+        spec.retrieve_sub(&dst_dir,&user_name.to_string_lossy());
 
-
-        let (status,_out,err) = util::run_at(context.build_command(spec),&dst_dir,false)?;
-        if ! status.success() {
-            let name = asgn_name.to_string_lossy();
-            let comp_name = (name.clone() + ".comp").to_string();
-            let comp_path = dst_dir.join(&comp_name);
-            fs::write(&comp_path,err.to_string_lossy().to_string())
-                .map_err(|err| {
-                    FailInfo::IOFail(format!("could not write compiler output to {} : {}",
-                    (&comp_path).display(),err)).into_log()
-                })?;
-            println!("Assignment files failed to build. Compiler output written to {}",comp_name);
-            return Ok(())
+        if ! spec.run_on_submit(context,spec.build.as_ref(),&dst_dir,"Building") {
+            return Ok(());
         }
         
-        let style_dir = dst_dir.join(".style");
-        util::refresh_dir(&style_dir,0o700,Vec::new().iter())?;        
-        for file_name in spec.file_list.iter() {
-            let src_path =   dst_dir.join(file_name);
-            let dst_path = style_dir.join(file_name);
-            if src_path.is_dir() {
-                continue;
-            }
-            fs::copy(&src_path,&dst_path)
-                .map_err(|err| {
-                    FailInfo::IOFail(format!("could not copy file {} to {} : {}",
-                    (&src_path).display(),(&dst_path).display(),err)).into_log()
-                })?;
+        if ! spec.run_on_submit(context,spec.check.as_ref(),&dst_dir,"Evaluating Checks") {
+            return Ok(());
         }
-
-        let (status,_out,err) = util::run_at(context.format_command(spec),&style_dir,false)?;
-        if ! status.success() {
-            return Err(FailInfo::FormatFail(err).into())
+        
+        if ! spec.run_on_submit(context,spec.score.as_ref(),&dst_dir,"Evaluating Scores") {
+            return Ok(());
         }
-        let (_status,out,_err) = util::run_at(context.style_command(spec),&style_dir,false)?;
-
-        if ! out.is_empty() {
-            let name = asgn_name.to_string_lossy();
-            let warn_name = (name.clone() + ".warn").to_string();
-            let warn_path = dst_dir.join(&warn_name);
-            fs::write(&warn_path,out.to_string_lossy().to_string())
-                .map_err(|err| {
-                    FailInfo::IOFail(format!("could not write style checker output to {} : {}",
-                    (&warn_path).display(),err)).into_log()
-                })?;
-            println!("Submission files produced style warnings. Warnings written to {}",warn_name);
-        }
-
-        for file_name in spec.file_list.iter() {
-            let cwd_path =   dst_dir.join(file_name);
-            let sty_path = style_dir.join(file_name);
-            let mut diff = Command::new("diff");
-            diff.arg("--color=always").arg(&cwd_path).arg(&sty_path);
-            let (_status,out,_err) = util::run_at(diff,&dst_dir,false)?;
-            
-            if ! out.is_empty() {
-                let name = file_name.to_string_lossy();
-                let diff_name = (name.clone() + ".diff").to_string();
-                let diff_path = dst_dir.join(&diff_name);
-                fs::write(&diff_path,out.to_string_lossy().to_string())
-                    .map_err(|err| {
-                        FailInfo::IOFail(format!("could not write format diff output to {} : {}",
-                        (&diff_path).display(),err)).into_log()
-                    })?;
-                println!("File {name} differs from course style. Difference written to {}",diff_name);
-            }
-        }
+        util::print_bold_hline();
+        
 
         Ok(())
     }
 
     fn copy_all(asgn_name: &OsString, context: &Context) -> Result<(),FailLog>
     {
+        let dst_dir = util::make_fresh_dir(&context.cwd,&asgn_name.to_string_lossy());
         let mut log : FailLog = Default::default();
         for student_name in context.students.iter() {
             println!("Processing {}",student_name.to_string_lossy());
-            let _ = Self::copy(asgn_name,student_name,context)
+            let _ = Self::copy(asgn_name,student_name,Some(&dst_dir),context)
                 .map_err(|err| log.extend(err));
         }
         log.result()
@@ -260,9 +205,12 @@ impl GraderAct
         use GraderAct::*;
         match self {
             Student(act)                  => act.execute(context),
-            Copy { asgn_name, stud_name } => Self::copy(asgn_name,stud_name,context),
+            Copy { asgn_name, stud_name } => Self::copy(asgn_name,stud_name,None,context),
             CopyAll { asgn_name }         => Self::copy_all(asgn_name,context),
-            Test { asgn_name }            => Self::test_local(asgn_name,context),
+            Build { asgn_name }           => Self::build(asgn_name,context),
+            Grade { asgn_name }           => Self::grade(asgn_name,context),
+            Check { asgn_name }           => Self::check(asgn_name,context),
+            Score { asgn_name }           => Self::score(asgn_name,context),
         }
     }
 

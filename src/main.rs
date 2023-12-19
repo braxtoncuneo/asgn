@@ -4,6 +4,7 @@ pub mod asgn_spec;
 pub mod context;
 pub mod fail_info;
 pub mod util;
+pub mod table;
 
 use std::
 {
@@ -59,7 +60,7 @@ fn check_files(context: &Context, spec: &AsgnSpec) -> Result<(),FailLog>
         .collect();
 
     log.result()
-    
+
 }
 
 fn attempt_submission(context: &Context, spec: &AsgnSpec) -> Result<(),FailLog>
@@ -105,7 +106,7 @@ fn main()
 
     let result = match &context.role {
         Role::Instructor => {
-            context.announce();
+            //context.announce();
             let cmd = act::instructor::InstructorCmd::from_args();
             cmd.act.execute(&mut context)
         },

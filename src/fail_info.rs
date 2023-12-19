@@ -39,6 +39,13 @@ pub enum FailInfo
     FileIsOther(OsString),
     NoSetup(OsString),
     Unauthorized(),
+    BeforeOpen,
+    AfterClose,
+    Inactive,
+    NoGrace,
+    NotEnoughGrace,
+    GraceLimit,
+    Custom(String,String),
 }
 
 impl FailInfo
@@ -132,6 +139,25 @@ impl FailInfo
             Unauthorized()          => format!( "{}",
                 "Action is not authorized".red()
             ),
+            BeforeOpen => format!("{}",
+                "Assignments cannot be interacted with before their open date.".red()
+            ),
+            AfterClose => format!("{}",
+                "Assignments cannot be interacted with after their close date.".red()
+            ),
+            Inactive => format!("{}",
+                "Interaction with this assignment is currently disabled.".red()
+            ),
+            NoGrace => format!("{}",
+                "This course does not provide grace days.".red()
+            ),
+            NotEnoughGrace => format!("{}",
+                "There aren't enough free grace days to provide such an extension.".red()
+            ),
+            GraceLimit => format!("{}",
+                "The number of grace days requested exceeds the per-assignment grace day limit.".red()
+            ),
+            Custom(text,_) => format!("{}",text.red()),
         }
     }
 
@@ -210,6 +236,25 @@ impl FailInfo
             Unauthorized()          => format!("{}",
                 "Please contact the instructor".yellow()
             ),
+            BeforeOpen => format!("{}",
+                "If you believe this assignment should be open, contact the instructor.".yellow()
+            ),
+            AfterClose => format!("{}",
+                "If you believe this assignment should not be closed yet, contact the instructor.".yellow()
+            ),
+            Inactive => format!("{}",
+                "If you believe this assignment should be enabled, contact the instructor.".yellow()
+            ),
+            NoGrace => format!("{}",
+                "Assignments should be turned in on-time for full credit.".yellow()
+            ),
+            NotEnoughGrace => format!("{}",
+                "To increase the number of available grace days, remove grace days from other assignments.".yellow()
+            ),
+            GraceLimit => format!("{}",
+                "Assignments should be turned in before the grace day limit for full credit.".yellow()
+            ),
+            Custom(_,text) => format!("{}",text.yellow()),
         }
     }
 
