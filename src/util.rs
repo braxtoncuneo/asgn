@@ -106,10 +106,9 @@ pub fn set_mode
     cmd.arg(format!("{:o}",mode));
     cmd.arg(path.as_ref());
 
-
     let output = cmd.output()
         .map_err(|err| -> FailLog {
-            FailInfo::IOFail(format!("running chmod: {}",err)).into()
+            FailInfo::IOFail(format!("chmoding {} : {}",path.as_ref().display(),err)).into()
         })?;
 
     let stderr = OsString::from_vec(output.stderr);
@@ -268,11 +267,18 @@ pub fn recursive_refresh_dir
     facl: E,
 ) -> Result<(),FailLog>
 {
-    refresh_dir(path.clone(),mode,facl.clone())?;
-    for maybe_entry in WalkDir::new(path)
+    if path.as_ref().is_file() {
+        return refresh_file(path.clone(),mode,String::new());
+    } else if path.as_ref().is_dir() {
+        refresh_dir(path.clone(),mode,facl.clone())?;
+    } else {
+        return Ok(());
+    }
+
+    for maybe_entry in WalkDir::new(path).min_depth(1)
     {
-        let  dir_entry= maybe_entry.map_err(|err| FailInfo::IOFail(format!("{}",err)).into_log())?;
-        refresh_dir(dir_entry.path(),mode,facl.clone())?;
+        let  dir_entry = maybe_entry.map_err(|err| FailInfo::IOFail(format!("{}",err)).into_log())?;
+        recursive_refresh_dir(dir_entry.path(),mode,facl.clone())?;
     }
     Ok(())
 }

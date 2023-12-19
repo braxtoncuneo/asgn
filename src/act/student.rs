@@ -190,7 +190,7 @@ impl StudentAct
         let text  = fs::read_to_string(path)
                 .map_err(|err|FailInfo::IOFail(format!("{}",err)).into_log())?;
         T::from_str(&text)
-            .map_err(|err|FailInfo::IOFail(
+            .map_err(|_|FailInfo::IOFail(
                 format!("Failed to parse score {} for student {}",score_name,student_name)
             ).into_log())
     }
@@ -206,7 +206,7 @@ impl StudentAct
         header.extend(score_names.iter().cloned());
 
         let mut table : Table = Table::new(header.len());
-        table.add_row(header);
+        table.add_row(header)?;
         
         
         let mut rows : Vec<(Option<T>,Vec<Option<String>>)> = Vec::new();
@@ -237,12 +237,12 @@ impl StudentAct
             rows.push((score,row));
         }
 
-        rows.sort_by(|(a,x), (b,y)| {
+        rows.sort_by(|(a,_), (b,_)| {
             match (a,b) {
                 (Some(a_score),Some(b_score)) => if up {
-                        a.partial_cmp(b).unwrap()
+                        a_score.partial_cmp(b_score).unwrap()
                     } else {
-                        a.partial_cmp(b).unwrap().reverse()
+                        a_score.partial_cmp(b_score).unwrap().reverse()
                     },
                 (Some(_),None) => std::cmp::Ordering::Less,
                 (None,Some(_)) => std::cmp::Ordering::Greater,
@@ -250,7 +250,7 @@ impl StudentAct
             }
         });
 
-        for row in rows.iter().map(|(a,b)| b) {
+        for row in rows.iter().map(|(_,b)| b) {
             let row : Vec<String> = row.iter()
                 .map(|entry| entry.clone().unwrap_or("None".to_string()))
                 .collect();
@@ -277,7 +277,7 @@ impl StudentAct
             ).into_log());
         };
 
-        let mut kind = ruleset.rules.iter()
+        let kind = ruleset.rules.iter()
             .filter(|rule| rule.target == rule_name)
             .next()
             .map(|r| r.kind.clone())

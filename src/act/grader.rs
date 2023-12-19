@@ -4,7 +4,6 @@ use super::student::StudentAct;
 use std::
 {
     ffi::OsString,
-    fs,
     path::Path,
 };
 
@@ -103,7 +102,7 @@ impl GraderAct
             .as_ref().map_err(|err| err.clone() )?;
 
         let cwd = context.cwd.clone();
-        spec.run_ruleset(context,spec.build.as_ref(),&cwd).is_err();
+        let _ = spec.run_ruleset(context,spec.build.as_ref(),&cwd).is_err();
 
         Ok(())
     }
@@ -125,7 +124,7 @@ impl GraderAct
 
         util::print_bold_hline();
         println!("{}","Evaluating Grades".yellow().bold());
-        spec.run_ruleset(context,spec.grade.as_ref(),&cwd).is_err();
+        let _ = spec.run_ruleset(context,spec.grade.as_ref(),&cwd).is_err();
         
         util::print_bold_hline();
 
@@ -138,8 +137,11 @@ impl GraderAct
             .ok_or(FailInfo::InvalidAsgn(asgn_name.clone()).into_log())?
             .as_ref().map_err(|err| err.clone() )?;
 
+        util::print_bold_hline();
+        println!("{}","Evaluating Checks".yellow().bold());
         let cwd = context.cwd.clone();
-        spec.run_ruleset(context,spec.check.as_ref(),&cwd).is_err();
+        let _ = spec.run_ruleset(context,spec.check.as_ref(),&cwd).is_err();
+        util::print_bold_hline();
 
         Ok(())
     }
@@ -150,14 +152,17 @@ impl GraderAct
             .ok_or(FailInfo::InvalidAsgn(asgn_name.clone()).into_log())?
             .as_ref().map_err(|err| err.clone() )?;
 
+        util::print_bold_hline();
+        println!("{}","Evaluating Scores".yellow().bold());
         let cwd = context.cwd.clone();
-        spec.run_ruleset(context,spec.score.as_ref(),&cwd).is_err();
+        let _ = spec.run_ruleset(context,spec.score.as_ref(),&cwd).is_err();
+        util::print_bold_hline();
 
         Ok(())
     }
 
 
-    fn copy(asgn_name: &OsString, user_name: &OsString, dst_dir : Option<&Path>, context: &Context)
+    pub fn copy(asgn_name: &OsString, user_name: &OsString, dst_dir : Option<&Path>, context: &Context)
     -> Result<(),FailLog>
     {
 
@@ -169,7 +174,7 @@ impl GraderAct
         
         let dst_dir = util::make_fresh_dir(dst_dir,&user_name.to_string_lossy());
         
-        spec.retrieve_sub(&dst_dir,&user_name.to_string_lossy());
+        spec.retrieve_sub(&dst_dir,&user_name.to_string_lossy())?;
 
         if ! spec.run_on_submit(context,spec.build.as_ref(),&dst_dir,"Building") {
             return Ok(());
@@ -188,16 +193,21 @@ impl GraderAct
         Ok(())
     }
 
-    fn copy_all(asgn_name: &OsString, context: &Context) -> Result<(),FailLog>
+    pub fn copy_all(asgn_name: &OsString, dst_dir : Option<&Path>, context: &Context) -> Result<(),FailLog>
     {
-        let dst_dir = util::make_fresh_dir(&context.cwd,&asgn_name.to_string_lossy());
-        let mut log : FailLog = Default::default();
+        let dst_dir = dst_dir.map(|p|p.to_path_buf()).unwrap_or(
+            util::make_fresh_dir(&context.cwd,&asgn_name.to_string_lossy())
+        );
+        util::refresh_dir(&dst_dir,0o700,Vec::new().iter())?;
         for student_name in context.students.iter() {
-            println!("Processing {}",student_name.to_string_lossy());
-            let _ = Self::copy(asgn_name,student_name,Some(&dst_dir),context)
-                .map_err(|err| log.extend(err));
+            println!("{}",format!("Retrieving Submission for '{}'",student_name.to_string_lossy()).bold());
+            if let Err(err) = Self::copy(asgn_name,student_name,Some(&dst_dir),context){
+                util::print_bold_hline();
+                print!("{}",err);
+                util::print_bold_hline();
+            }
         }
-        log.result()
+        Ok(())
     }
 
     pub fn execute(&self, context: &Context) -> Result<(),FailLog>
@@ -206,7 +216,7 @@ impl GraderAct
         match self {
             Student(act)                  => act.execute(context),
             Copy { asgn_name, stud_name } => Self::copy(asgn_name,stud_name,None,context),
-            CopyAll { asgn_name }         => Self::copy_all(asgn_name,context),
+            CopyAll { asgn_name }         => Self::copy_all(asgn_name,None,context),
             Build { asgn_name }           => Self::build(asgn_name,context),
             Grade { asgn_name }           => Self::grade(asgn_name,context),
             Check { asgn_name }           => Self::check(asgn_name,context),

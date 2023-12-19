@@ -353,12 +353,28 @@ impl AsgnSpec
         Ok(table.as_table())
     }
 
-    pub fn make_command(&self, target: &str, quiet: bool) -> std::process::Command {
+    pub fn make_command(&self, target: &str, quiet: bool, context: &Context) -> std::process::Command {
         let path = self.path.join(".info").join("Makefile");
         let mut cmd  = std::process::Command::new("make");
         if quiet {
             cmd.arg("--quiet");
         }
+        cmd.arg(format!(
+            "COURSE_PUBLIC={}",
+            context.base_path.join(".info").join("public").display()
+        ));
+        cmd.arg(format!(
+            "COURSE_PRIVATE={}",
+            context.base_path.join(".info").join("private").display()
+        ));
+        cmd.arg(format!(
+            "PUBLIC={}",
+            self.path.join(".info").join("public").display()
+        ));
+        cmd.arg(format!(
+            "PRIVATE={}",
+            self.path.join(".info").join("private").display()
+        ));
         cmd.arg(format!("--file={}",path.display()));
         cmd.arg(target);
         cmd
@@ -379,7 +395,7 @@ impl AsgnSpec
             Role::Other      => true,
         };
 
-        let mut cmd = self.make_command(rule.target.as_ref(),quiet);
+        let mut cmd = self.make_command(rule.target.as_ref(),quiet,context);
         cmd.stdout(Stdio::inherit());
         cmd.stderr(Stdio::inherit());
 
@@ -395,19 +411,19 @@ impl AsgnSpec
         } else {
             let fail_text = rule.fail_text.clone()
                 .unwrap_or(format!("'{}' failed.",&rule.target));
-            let pass_text = format!("! {}", fail_text)
+            let fail_text = format!("! {}", fail_text)
                 .red();
             let help_text = rule.help_text.as_ref().map(|t|t.yellow().to_string());
             if ! rule.fail_okay.unwrap_or(false) {
                 println!("{}",fail_text);
                 if let Some(help) = help_text {
-                    println!("> {}",help.yellow());
+                    println!("{}",format!("> {}",help).yellow());
                 }
                 Err(())
             } else {
                 println!("{}",fail_text);
                 if let Some(help) = help_text {
-                    println!("  > {}",help.yellow());
+                    println!("{}",format!("> {}",help).yellow());
                 }
                 Ok(false)
             }
@@ -537,8 +553,6 @@ impl AsgnSpec
         }
         Ok(())
     }
-
-
 
 }
 

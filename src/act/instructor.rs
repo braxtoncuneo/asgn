@@ -1,5 +1,4 @@
 use structopt::StructOpt;
-use super::grader::GraderAct;
 use std::{
     ffi::OsString,
     str::FromStr,
@@ -15,10 +14,14 @@ use crate::
         FailInfo,
     },
     asgn_spec::AsgnSpec,
-    act::student::StudentAct,
+    act::{
+        student::StudentAct,
+        grader::GraderAct,
+    },
+    util,
 };
 
-
+use colored::Colorize;
 
 #[derive(Debug,StructOpt)]
 #[structopt(
@@ -136,6 +139,11 @@ pub enum InstructorAct
     },
     #[structopt(about = "[instructors only] unpublishes the assignment, disallowing students from seeing it in the course summary")]
     Unpublish{
+        #[structopt(name = "assignment name")]
+        asgn: OsString,
+    },
+    #[structopt(about = "[instructors only] updates published ranks for a given assignment based upon current submissions")]
+    UpdateRanks{
         #[structopt(name = "assignment name")]
         asgn: OsString,
     },
@@ -331,11 +339,48 @@ impl InstructorAct
         slot.set_extension(ext_days)
     }
 
+
     fn update_ranks(asgn: OsString, context : &mut Context) -> Result<(),FailLog> {
-        let spec : &mut AsgnSpec = context.catalog.get_mut(&asgn)
+        let spec : &AsgnSpec = context.catalog.get(&asgn)
             .ok_or(FailInfo::InvalidAsgn(asgn.clone()).into_log())?
-            .as_mut().map_err(|err| err.clone() )?;
-        spec.sync()
+            .as_ref().map_err(|err| err.clone() )?;
+        let info_path  = spec.path.join(".info");
+        let score_path = info_path.join("ranking");
+        let build_path = info_path.join("score_builds");
+        if build_path.exists() {
+            std::fs::remove_dir_all(&build_path)
+                .map_err(|err|FailInfo::IOFail(
+                    format!("Failed to remove directory '{}' : {}",build_path.display(),err)
+                ).into_log())?;
+        }
+        GraderAct::copy_all(&asgn,Some(&build_path),context)?;
+        for student in context.students.iter() {
+            let student_build_dir = build_path.join(student);
+            let student_score_dir = score_path.join(student);
+            if let Some(score) = &spec.score {
+                if ! score.on_submit.unwrap_or(true) {
+                    util::print_bold_hline();
+                    println!("{}",format!("Scoring Submission for '{}'",student.to_string_lossy()).bold());
+                    let _ = spec.run_ruleset(context,spec.score.as_ref(),&student_build_dir);
+                    util::print_bold_hline();
+                }
+                for rule in score.rules.iter() {
+                    let student_score = student_build_dir.join(&rule.target);
+                    let public_score  = student_score_dir.join(&rule.target);
+                    if ! student_score.exists() {
+                        continue;
+                    }
+                    println!("{} -> {}",student_score.display(),public_score.display());
+                    std::fs::copy(&student_score,&public_score)
+                        .map_err(|err|FailInfo::IOFail(format!(
+                            "Failed to copy '{}' to '{}' : {}",
+                            &student_score.display(),&public_score.display(),err
+                        )).into_log())?;
+                }
+            }
+        }
+        util::recursive_refresh_dir(build_path,0o700,Vec::new().iter())?;
+        Ok(())
     }
 
 
@@ -364,11 +409,12 @@ impl InstructorAct
             Unpublish   {asgn}       => Self::unpublish(asgn,context),
             Enable      {asgn}       => Self::enable(asgn,context),
             Disable     {asgn}       => Self::disable(asgn,context),
+            UpdateRanks {asgn}       => Self::update_ranks(asgn,context),
             Extend   {asgn,user,ext} => Self::extend(asgn,user,ext,context),
             SetGrace {asgn,user,ext} => StudentAct::grace(&asgn,&user,ext,context),
-            GraceTotal {num}         => Self::grace_total(num,context),
-            GraceLimit {num}         => Self::grace_limit(num,context),
-            Refresh  {}              => context.refresh(),
+            GraceTotal  {num}        => Self::grace_total(num,context),
+            GraceLimit  {num}        => Self::grace_limit(num,context),
+            Refresh     {}           => context.refresh(),
         }
     }
 

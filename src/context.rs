@@ -386,7 +386,7 @@ impl Context
             util::recursive_refresh_dir(&path,*flags,facl.clone())?;
         }
             
-        util::recursive_refresh_dir(asgn_spec_path.join("score_builds"),0o700,empty.iter());
+        util::recursive_refresh_dir(asgn_spec_path.join("score_builds"),0o700,empty.iter())?;
 
         
         let asgn_path = self.base_path.join(asgn);
