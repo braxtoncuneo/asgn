@@ -113,11 +113,11 @@ impl GraderAct
             .ok_or(FailInfo::InvalidAsgn(asgn_name.clone()).into_log())?
             .as_ref().map_err(|err| err.clone() )?;
         let cwd = context.cwd.clone();
-        
+
         if ! spec.run_on_grade(context,spec.check.as_ref(),&cwd,"Evaluating Checks") {
             return Ok(());
         }
-        
+
         if ! spec.run_on_grade(context,spec.score.as_ref(),&cwd,"Evaluating Scores") {
             return Ok(());
         }
@@ -125,7 +125,7 @@ impl GraderAct
         util::print_bold_hline();
         println!("{}","Evaluating Grades".yellow().bold());
         let _ = spec.run_ruleset(context,spec.grade.as_ref(),&cwd).is_err();
-        
+
         util::print_bold_hline();
 
         Ok(())
@@ -171,24 +171,24 @@ impl GraderAct
             ?.as_ref().map_err(|err| err.clone() )?;
 
         let dst_dir = dst_dir.unwrap_or(&context.cwd);
-        
+
         let dst_dir = util::make_fresh_dir(dst_dir,&user_name.to_string_lossy());
-        
+
         spec.retrieve_sub(&dst_dir,&user_name.to_string_lossy())?;
 
         if ! spec.run_on_submit(context,spec.build.as_ref(),&dst_dir,"Building") {
             return Ok(());
         }
-        
+
         if ! spec.run_on_submit(context,spec.check.as_ref(),&dst_dir,"Evaluating Checks") {
             return Ok(());
         }
-        
+
         if ! spec.run_on_submit(context,spec.score.as_ref(),&dst_dir,"Evaluating Scores") {
             return Ok(());
         }
         util::print_bold_hline();
-        
+
 
         Ok(())
     }
@@ -199,9 +199,9 @@ impl GraderAct
             util::make_fresh_dir(&context.cwd,&asgn_name.to_string_lossy())
         );
         util::refresh_dir(&dst_dir,0o700,Vec::new().iter())?;
-        for student_name in context.students.iter() {
-            println!("{}",format!("Retrieving Submission for '{}'",student_name.to_string_lossy()).bold());
-            if let Err(err) = Self::copy(asgn_name,student_name,Some(&dst_dir),context){
+        for member_name in context.members.iter() {
+            println!("{}",format!("Retrieving Submission for '{}'",member_name.to_string_lossy()).bold());
+            if let Err(err) = Self::copy(asgn_name,member_name,Some(&dst_dir),context){
                 util::print_bold_hline();
                 print!("{}",err);
                 util::print_bold_hline();

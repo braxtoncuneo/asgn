@@ -77,14 +77,12 @@ fn attempt_submission(context: &Context, spec: &AsgnSpec) -> Result<(),FailLog>
 
 
 
-
-
 fn main()
 {
 
     //let cmd = act::student::StudentCmd::from_args();
 
-    let mut args = std::env::args();
+    let mut args = std::env::args().peekable();
 
     args.next();
 
@@ -94,11 +92,24 @@ fn main()
         return;
     };
 
-    let ctx_try = Context::deduce(OsString::from(base_path));
+    let ctx_try = Context::deduce(OsString::from(&base_path));
 
     let mut context = match ctx_try {
-        Ok(cont) => cont,
-        Err(err) => {
+        Ok(cont) => if args.peek() == Some(&"init".to_string()) {
+            print!("{}",FailInfo::Custom(
+                "Provided path is already the base path of a pre-existing, valid course directory.".to_string(),
+                "Either clear out that directory, or use a different one.".to_string()
+            ));
+            return;
+        } else {
+            cont
+        },
+        Err(err) => if args.peek() == Some(&"init".to_string()) {
+            if let Err(log) = context::init(&PathBuf::from(&base_path)) {
+                print!("{}",log);
+            }
+            return;
+        } else {
             println!("{}",err);
             return;
         },

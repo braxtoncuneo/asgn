@@ -30,6 +30,7 @@ use chrono::
 {
     DateTime,
     Datelike,
+    Timelike,
     Local,
     TimeZone,
     Duration,
@@ -81,7 +82,7 @@ pub struct AsgnSpecToml
     name       : String,
     active     : bool,
     visible    : bool,
-    due_date   : toml::value::Datetime,
+    due_date   : Option<toml::value::Datetime>,
     open_date  : Option<toml::value::Datetime>,
     close_date : Option<toml::value::Datetime>,
     file_list  : Vec<String>,
@@ -96,23 +97,12 @@ impl Default for AsgnSpecToml
 {
     fn default() -> Self
     {
-        let date = toml::value::Date {
-            year  : 1970,
-            month : 1,
-            day   : 1,
-        };
-
-        let due_date = toml::value::Datetime {
-            date   : Some(date),
-            time   : None,
-            offset : None,
-        };
 
         Self {
             name       : "<put name here>".to_string(),
             active     : false,
             visible    : false,
-            due_date,
+            due_date   : None,
             open_date  : None,
             close_date : None,
             file_list  : Vec::new(),
@@ -144,7 +134,7 @@ pub struct AsgnSpec
     pub name       : String,
     pub active     : bool,
     pub visible    : bool,
-    pub due_date   : DateTime<Local>,
+    pub due_date   : Option<DateTime<Local>>,
     pub open_date  : Option<DateTime<Local>>,
     pub close_date : Option<DateTime<Local>>,
     pub file_list  : Vec<OsString>,
@@ -162,12 +152,18 @@ impl AsgnSpec
 {
 
     pub fn date_into_chrono(deadline : toml::value::Datetime) -> Result<chrono::DateTime<Local>,FailLog> {
+        let (hr,min,sec) : (u32,u32,u32) = if let Some (time) = deadline.time {
+            (time.hour.into(),time.minute.into(),time.second.into())
+        } else {
+            (23,59,59)
+        };
+
         match deadline.date {
             Some(date) => {
                 let y : i32 = date.year  as i32;
                 let m : u32 = date.month as u32;
                 let d : u32 = date.day   as u32;
-                Ok(chrono::offset::Local.with_ymd_and_hms(y,m,d,23,59,59).unwrap())
+                Ok(chrono::offset::Local.with_ymd_and_hms(y,m,d,hr,min,sec).unwrap())
             },
             None       => {
                 return Err(FailInfo::BadSpec(
@@ -179,14 +175,20 @@ impl AsgnSpec
     }
 
     pub fn date_from_chrono(deadline : chrono::DateTime<Local>) -> toml::value::Datetime{
-        let naive = deadline.date_naive();
+        let date_naive = deadline.date_naive();
+        let time = deadline.time();
         toml::value::Datetime {
             date: Some(toml::value::Date{
-                year  : naive.year()  as u16,
-                month : naive.month() as u8,
-                day   : naive.day()   as u8,
+                year  : date_naive.year()  as u16,
+                month : date_naive.month() as u8,
+                day   : date_naive.day()   as u8,
             }),
-            time: None,
+            time: Some(toml::value::Time{
+                hour   : time.hour()   as u8,
+                minute : time.minute() as u8,
+                second : time.second() as u8,
+                nanosecond : 0,
+            }),
             offset: None,
         }
     }
@@ -228,7 +230,11 @@ impl AsgnSpec
             None
         };
 
-        let due_date = Self::date_into_chrono(spec_toml.due_date)?;
+        let due_date = if let Some(date) = spec_toml.due_date {
+            Some(Self::date_into_chrono(date)?)
+        } else {
+            None
+        };
 
         let spec = AsgnSpec {
             name       : spec_toml.name,
@@ -263,7 +269,7 @@ impl AsgnSpec
             name       : self.name.clone(),
             active     : self.active,
             visible    : self.visible,
-            due_date   : Self::date_from_chrono(self.due_date),
+            due_date   : self.due_date.map(Self::date_from_chrono),
             open_date  : self.open_date.map(Self::date_from_chrono),
             close_date : self.close_date.map(Self::date_from_chrono),
             file_list  : util::stringify_osstr_vec(&self.file_list),
@@ -339,7 +345,7 @@ impl AsgnSpec
         ])?;
         table.add_row(vec![
             "DUE DATE".to_string(),
-            self.due_date.to_string(),
+            self.due_date.map(|d|d.to_string()).unwrap_or("NONE".to_string()),
         ])?;
         table.add_row(vec![
             "EXTENSION".to_string(),
@@ -736,7 +742,15 @@ impl SubmissionStatus {
             //.checked_add(&chrono::Duration::days(1))
     }
 
-    pub fn versus(&self,time: &DateTime<Local>) -> String {
+    pub fn versus(&self,time: Option<&DateTime<Local>>) -> String {
+
+        let Some(time) = time else {
+            if self.turn_in_time.is_some() {
+                return String::from("Submitted");
+            } else {
+                return String::from("Not Submitted");
+            }
+        };
 
         let late_by = self.time_past(time);
 

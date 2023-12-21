@@ -243,7 +243,7 @@ impl InstructorAct
         let spec : &mut AsgnSpec = Self::get_mut_spec(&asgn,context)?;
         let date = toml::value::Datetime::from_str(&date.to_string_lossy())
             .map_err(|err| FailInfo::IOFail(format!("{}",err)))?;
-        spec.due_date = AsgnSpec::date_into_chrono(date)?;
+        spec.due_date = Some(AsgnSpec::date_into_chrono(date)?);
         spec.sync()
     }
 
@@ -354,27 +354,27 @@ impl InstructorAct
                 ).into_log())?;
         }
         GraderAct::copy_all(&asgn,Some(&build_path),context)?;
-        for student in context.students.iter() {
-            let student_build_dir = build_path.join(student);
-            let student_score_dir = score_path.join(student);
+        for member in context.members.iter() {
+            let member_build_dir = build_path.join(member);
+            let member_score_dir = score_path.join(member);
             if let Some(score) = &spec.score {
                 if ! score.on_submit.unwrap_or(true) {
                     util::print_bold_hline();
-                    println!("{}",format!("Scoring Submission for '{}'",student.to_string_lossy()).bold());
-                    let _ = spec.run_ruleset(context,spec.score.as_ref(),&student_build_dir);
+                    println!("{}",format!("Scoring Submission for '{}'",member.to_string_lossy()).bold());
+                    let _ = spec.run_ruleset(context,spec.score.as_ref(),&member_build_dir);
                     util::print_bold_hline();
                 }
                 for rule in score.rules.iter() {
-                    let student_score = student_build_dir.join(&rule.target);
-                    let public_score  = student_score_dir.join(&rule.target);
-                    if ! student_score.exists() {
+                    let member_score = member_build_dir.join(&rule.target);
+                    let public_score  = member_score_dir.join(&rule.target);
+                    if ! member_score.exists() {
                         continue;
                     }
-                    println!("{} -> {}",student_score.display(),public_score.display());
-                    std::fs::copy(&student_score,&public_score)
+                    println!("{} -> {}",member_score.display(),public_score.display());
+                    std::fs::copy(&member_score,&public_score)
                         .map_err(|err|FailInfo::IOFail(format!(
                             "Failed to copy '{}' to '{}' : {}",
-                            &student_score.display(),&public_score.display(),err
+                            &member_score.display(),&public_score.display(),err
                         )).into_log())?;
                 }
             }

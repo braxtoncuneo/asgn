@@ -207,25 +207,25 @@ impl StudentAct
 
         let mut table : Table = Table::new(header.len());
         table.add_row(header)?;
-        
-        
+
+
         let mut rows : Vec<(Option<T>,Vec<Option<String>>)> = Vec::new();
-        
+
         let base_path = asgn.path.join(".info").join("ranking");
 
-        for student in context.students.iter() {
-            let student = student.to_string_lossy().to_string();
-            let student_path = base_path.join(student.clone());
-            let main_score_path = student_path.join(rule_name.clone()); 
+        for member in context.members.iter() {
+            let member = member.to_string_lossy().to_string();
+            let member_path = base_path.join(member.clone());
+            let main_score_path = member_path.join(rule_name.clone());
             let score   = if main_score_path.exists() {
-                Some(Self::read_score(asgn,&student,rule_name)?)
+                Some(Self::read_score(asgn,&member,rule_name)?)
             } else {
                 None
             };
-            let mut row = vec![Some(student.clone())];
+            let mut row = vec![Some(member.clone())];
             for rule in ruleset.rules.iter() {
                 let name = rule.target.clone();
-                let score_path = student_path.join(name);
+                let score_path = member_path.join(name);
                 let text = if score_path.exists() {
                     Some(fs::read_to_string(score_path)
                         .map_err(|err|FailInfo::IOFail(format!("{}",err)).into_log())?)
@@ -337,17 +337,17 @@ impl StudentAct
             util::set_mode(&dst_path,0o777)?;
         }
         log.result()?;
-        
+
         println!("{}",format!("Assignment '{}' submitted!",asgn_name.to_string_lossy()).green());
 
         if ! spec.run_on_submit(context,spec.build.as_ref(),&sub_dir,"Building") {
             return Ok(());
         }
-        
+
         if ! spec.run_on_submit(context,spec.check.as_ref(),&sub_dir,"Evaluating Checks") {
             return Ok(());
         }
-        
+
         if ! spec.run_on_submit(context,spec.score.as_ref(),&sub_dir,"Evaluating Scores") {
             return Ok(());
         }

@@ -47,6 +47,7 @@ use crate::{
     },
     util,
     table::Table,
+    act::instructor::InstructorAct,
 };
 
 
@@ -60,7 +61,7 @@ use itertools::Itertools;
 
 
 #[derive(Default,Serialize,Deserialize)]
-struct CourseToml
+pub struct CourseToml
 {
     manifest    : Vec<String>,
     graders     : Vec<String>,
@@ -96,6 +97,7 @@ pub struct Context
     pub manifest     : Vec<OsString>,
     pub graders      : Vec<OsString>,
     pub students     : Vec<OsString>,
+    pub members      : Vec<OsString>,
     pub grace_total  : Option<i64>,
     pub grace_limit  : Option<i64>,
 
@@ -214,6 +216,9 @@ impl Context
             role = Role::Instructor;
         }
 
+        let mut members = vec![instructor.clone()];
+        members.extend(graders.clone());
+        members.extend(students.clone());
 
         let mut context = Self {
             instructor,
@@ -226,6 +231,7 @@ impl Context
             manifest,
             graders,
             students,
+            members,
             grace_total,
             grace_limit,
             role,
@@ -327,16 +333,16 @@ impl Context
             facl_list.push(grad_entry);
         }
         Ok(facl_list)
-    } 
-    
-    
+    }
+
+
     fn refresh_root(&self) -> Result<(),FailLog>
     {
         util::refresh_dir(&self.base_path,0o755,Vec::new().iter())?;
 
         let course_info_path = self.base_path.join(".info");
         util::refresh_dir(&course_info_path,0o755,Vec::new().iter())?;
-        
+
         let course_file_path = course_info_path.join("course.toml");
         let course_toml : CourseToml = Default::default();
         let course_text = toml::to_string(&course_toml).unwrap();
@@ -372,7 +378,7 @@ impl Context
 
         let asgn_make_path = asgn_spec_path.join("Makefile");
         util::refresh_file(&asgn_make_path,0o644,String::new())?;
-        
+
         let empty = Vec::new();
         let grade = self.grader_facl(None)?;
         let dirs = [
@@ -380,30 +386,30 @@ impl Context
             ("private",0o700,grade.iter()),
             ("ranking",0o755,grade.iter())
         ];
-        
+
         for (name,flags,facl) in dirs.iter() {
             let path = asgn_spec_path.join(name);
             util::recursive_refresh_dir(&path,*flags,facl.clone())?;
         }
-            
+
         util::recursive_refresh_dir(asgn_spec_path.join("score_builds"),0o700,empty.iter())?;
 
-        
+
         let asgn_path = self.base_path.join(asgn);
 
-        for student in self.students.iter() {
-            let asgn_sub_path = asgn_path.join(student);
+        for member in self.members.iter() {
+            let asgn_sub_path = asgn_path.join(member);
 
-            let facl_list = self.grader_facl(Some(&student))?;
+            let facl_list = self.grader_facl(Some(&member))?;
 
             util::refresh_dir(asgn_sub_path,0o700,facl_list.iter())?;
-            
-            let ranking_path = asgn_spec_path.join("ranking").join(student);
+
+            let ranking_path = asgn_spec_path.join("ranking").join(member);
             util::recursive_refresh_dir(&ranking_path,0o755,facl_list.iter())?;
 
         }
-        
-        Ok(())    
+
+        Ok(())
     }
 
 
@@ -438,7 +444,7 @@ impl Context
         let slot = self.get_slot(asgn,user);
 
         let status = slot.status().unwrap();
-        let lateness = status.versus(&asgn.due_date);
+        let lateness = status.versus(asgn.due_date.as_ref());
 
         let extension = status.extension_days;
         let grace     = status.grace_days;
@@ -452,6 +458,19 @@ impl Context
         ]
     }
 
+    fn offset_date(date : Option<&DateTime<Local>>, offset : i64 ) -> Result<Option<DateTime<Local>>,FailLog>
+    {
+        if let Some(date) = date.as_ref() {
+            let offset_date = if offset >= 0 {
+                date.checked_add_days(Days::new(offset as u64))
+            } else {
+                date.checked_sub_days(Days::new((-offset) as u64))
+            }.ok_or(FailInfo::IOFail(format!("Extended date out of valid range.")))?;
+            Ok(Some(offset_date))
+        } else {
+            Ok(None)
+        }
+    }
 
     pub fn student_summary_row(&self, asgn: &AsgnSpec, user: &OsString) -> Result<Vec<String>,FailLog> {
         let sub_dir = self.base_path.join(&asgn.name).join(user);
@@ -467,13 +486,9 @@ impl Context
         let extension = status.extension_days;
         let grace     = status.grace_days;
         let bump = extension+grace;
-        let ext_due_date = if bump >= 0 {
-            asgn.due_date.checked_add_days(Days::new(bump as u64))
-        } else {
-            asgn.due_date.checked_sub_days(Days::new((-bump) as u64))
-        }.ok_or(FailInfo::IOFail(format!("Extended date out of valid range.")))?;
 
-        let lateness = status.versus(&ext_due_date);
+        let ext_due_date = Self::offset_date(asgn.due_date.as_ref(),bump)?;
+        let lateness = status.versus(ext_due_date.as_ref());
 
         let bump : String = if bump != 0 {format!(" {:+}",bump)} else { String::new() };
         let active = if !asgn.active {
@@ -496,7 +511,21 @@ impl Context
                 }
             });
 
-        let naive_due_date  = due_date.date_naive().to_string() + &bump;
+        let time_string = if let Some(time) = due_date {
+            let time_string = time.time().to_string();
+            if time_string == "23:59:59" {
+                String::from("")
+            } else {
+                String::from(" ") + &time_string
+            }
+        } else {
+            String::from("")
+        };
+
+
+        let naive_due_date  = due_date.map(|date| {
+                date.date_naive().to_string() + &bump + &time_string
+            }).unwrap_or(String::from("NONE"));
 
         Ok(vec![
             asgn.name.clone(),
@@ -535,12 +564,12 @@ impl Context
         };
 
         let user_list : Vec<&OsString> = if let Some(user_name) = user {
-            if ! self.students.contains(user_name) {
+            if ! self.members.contains(user_name) {
                 return Err(FailInfo::InvalidUser(user_name.clone()).into_log())
             }
             vec![user_name]
         } else {
-            self.students.iter().collect()
+            self.members.iter().collect()
         };
 
         let mut table = Table::new(header.len());
@@ -600,6 +629,25 @@ impl Context
     }
 
 
+}
+
+
+
+pub fn init(base_path : &Path) -> Result<(),FailLog> {
+    if base_path.exists() {
+        util::refresh_dir(&base_path,0o755,Vec::new().iter())?;
+        let info_path = base_path.join(".info");
+        util::refresh_dir(&info_path,0o755,Vec::new().iter())?;
+        let toml_path = info_path.join("course.toml");
+        util::refresh_file(&toml_path,0o755,toml::to_string(&CourseToml::default()).unwrap())?;
+        let mut context = Context::deduce(OsString::from(base_path))?;
+        InstructorAct::Refresh{}.execute(&mut context)
+    } else {
+        Err(FailInfo::Custom(
+            "Course directory path does not exist.".to_string(),
+            "Ensure that the provided path corresponds to an existing directory.".to_string(),
+        ).into_log())
+    }
 }
 
 
