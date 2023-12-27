@@ -420,8 +420,8 @@ impl StudentAct
         let line = format!(
             "alias {}=\"{} {}\"",
             alias_name.to_string_lossy(),
-            context.exe_path.to_string_lossy(),
-            context.base_path.to_string_lossy()
+            context.exe_path.clone().into_os_string().into_string().unwrap(),
+            context.base_path.clone().into_os_string().into_string().unwrap()
         );
         bashrc_append_line(line)?;
         println!("{}","Alias installed successfully.".yellow());

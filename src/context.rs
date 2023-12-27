@@ -175,6 +175,8 @@ impl Context
     pub fn deduce(base_path: OsString) -> Result<Self,FailLog>
     {
         let base_path : PathBuf = base_path.into();
+        let base_path = base_path.canonicalize().unwrap();
+
         let uid  : u32      = get_current_uid();
         let user : OsString = get_user_by_uid(uid)
                 .ok_or(FailInfo::InvalidUID() )?.name().into();
