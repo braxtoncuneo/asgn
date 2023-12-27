@@ -126,6 +126,11 @@ pub enum InstructorAct
         #[structopt(name = "yyyy-mm-dd")]
         date: OsString,
     },
+    #[structopt(about = "[instructors only] removes the due date of an assignment")]
+    UnsetDue{
+        #[structopt(name = "assignment name")]
+        asgn: OsString,
+    },
     #[structopt(about = "[instructors only] removes the open date of an assignment")]
     UnsetOpen{
         #[structopt(name = "assignment name")]
@@ -300,6 +305,13 @@ impl InstructorAct
         let date = toml::value::Datetime::from_str(&date.to_string_lossy())
             .map_err(|err| FailInfo::IOFail(format!("{}",err)))?;
         spec.close_date = Some(util::date_into_chrono(date)?);
+        spec.sync()
+    }
+
+    fn unset_due(asgn: OsString, context: &mut Context) -> Result<(),FailLog>
+    {
+        let spec : &mut AsgnSpec = Self::get_mut_spec(&asgn,context)?;
+        spec.due_date = None;
         spec.sync()
     }
 
@@ -514,6 +526,7 @@ impl InstructorAct
             SetDue      {asgn,date}    => Self::set_due(asgn,date,context),
             SetOpen     {asgn,date}    => Self::set_open(asgn,date,context),
             SetClose    {asgn,date}    => Self::set_close(asgn,date,context),
+            UnsetDue    {asgn}         => Self::unset_due(asgn,context),
             UnsetOpen   {asgn}         => Self::unset_open(asgn,context),
             UnsetClose  {asgn}         => Self::unset_close(asgn,context),
             Publish     {asgn}         => Self::publish(asgn,context),
