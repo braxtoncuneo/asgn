@@ -22,6 +22,7 @@ use std::
 
 use chrono::
 {
+    TimeZone,
     DateTime,
     Local,
     Days,
@@ -78,6 +79,7 @@ pub enum Role
     Student,
     Other,
 }
+
 
 
 pub struct Context
@@ -161,12 +163,11 @@ impl Context
     }
 
 
-    fn populate_catalog(&mut self)
+    pub fn populate_catalog(&mut self)
     {
         for asgn_name in self.manifest.iter() {
             let spec_path = self.base_path
                 .join(asgn_name);
-
             self.catalog.insert(asgn_name.clone(), AsgnSpec::load(spec_path));
         }
     }
@@ -379,12 +380,14 @@ impl Context
         let asgn_make_path = asgn_spec_path.join("Makefile");
         util::refresh_file(&asgn_make_path,0o644,String::new())?;
 
+        let asgn_make_path = asgn_spec_path.join("score.toml");
+        util::refresh_file(&asgn_make_path,0o644,String::new())?;
+
         let empty = Vec::new();
         let grade = self.grader_facl(None)?;
         let dirs = [
             ("public", 0o755,empty.iter()),
             ("private",0o700,grade.iter()),
-            ("ranking",0o755,grade.iter())
         ];
 
         for (name,flags,facl) in dirs.iter() {
@@ -392,7 +395,10 @@ impl Context
             util::recursive_refresh_dir(&path,*flags,facl.clone())?;
         }
 
-        util::recursive_refresh_dir(asgn_spec_path.join("score_builds"),0o700,empty.iter())?;
+        let internal_path = asgn_spec_path.join(".internal");
+        util::recursive_refresh_dir(&internal_path,0o700,empty.iter())?;
+        let score_build_path = internal_path.join("score_build");
+        util::recursive_refresh_dir(&score_build_path,0o700,empty.iter())?;
 
 
         let asgn_path = self.base_path.join(asgn);
@@ -402,10 +408,10 @@ impl Context
 
             let facl_list = self.grader_facl(Some(&member))?;
 
-            util::refresh_dir(asgn_sub_path,0o700,facl_list.iter())?;
+            util::refresh_dir(asgn_sub_path.clone(),0o700,facl_list.iter())?;
 
-            let ranking_path = asgn_spec_path.join("ranking").join(member);
-            util::recursive_refresh_dir(&ranking_path,0o755,facl_list.iter())?;
+            let extension_path = asgn_sub_path.join(".extension");
+            util::refresh_file(extension_path,0o700,"value = 0".to_string())?;
 
         }
 
@@ -439,10 +445,82 @@ impl Context
         }
     }
 
-    pub fn instructor_summary_row(&self, asgn: &AsgnSpec, user: &OsString) -> Vec<String> {
+    fn offset_date(date : Option<&DateTime<Local>>, offset : i64 ) -> Result<Option<DateTime<Local>>,FailLog>
+    {
+        if let Some(date) = date.as_ref() {
+            //println!("??? {}",date);
+            //println!("!!! {}",date.checked_add_days(Days::new(offset as u64)).unwrap());
+            let offset_date = if offset >= 0 {
+                date.naive_local()
+                    .checked_add_days(Days::new(offset as u64))
+                    .ok_or(FailInfo::IOFail(format!("Extended date out of valid range.")))?
+            } else {
+                date.naive_local()
+                    .checked_sub_days(Days::new(-offset as u64))
+                    .ok_or(FailInfo::IOFail(format!("Extended date out of valid range.")))?
+            };
+            let offset_date = Local.from_local_datetime(&offset_date).single()
+                .ok_or(FailInfo::IOFail(format!("Extended date out of valid range.")))?;
+            Ok(Some(offset_date))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn assignment_summary_row(&self, asgn: &AsgnSpec) -> Vec<String> {
+
+        let active  = if asgn.active  {"YES"} else {"NO"};
+        let visible = if asgn.visible {"YES"} else {"NO"};
+
+        let status = if !asgn.active {
+            "DISABLED"
+        } else if asgn.before_open() {
+            "BEFORE OPEN"
+        } else if asgn.after_close() {
+            "AFTER CLOSE"
+        } else {
+            "ENABLED"
+        };
+
+        let due_date  = asgn.due_date;
+        let time_string = if let Some(time) = due_date {
+            let time_string = time.time().to_string();
+            if time_string == "23:59:59" {
+                String::from("")
+            } else {
+                String::from(" ") + &time_string
+            }
+        } else {
+            String::from("")
+        };
+        let naive_due_date  = due_date.map(|date| {
+                date.date_naive().to_string() + &time_string
+            }).unwrap_or(String::from("NONE"));
+
+
+        let file_list : String = asgn.file_list.iter()
+            .enumerate()
+            .fold(String::new(),|acc,(idx,text)| {
+                if idx == 0 {
+                    text.to_string_lossy().to_string()
+                } else {
+                    format!("{}  {}",acc,text.to_string_lossy().to_string())
+                }
+            });
+
+        vec![
+            asgn.name.clone(),
+            status.to_string(),
+            active.to_string(),
+            visible.to_string(),
+            naive_due_date,
+            file_list,
+        ]
+    }
+
+    pub fn submission_summary_row(&self, asgn: &AsgnSpec, user: &OsString) -> Vec<String> {
 
         let slot = self.get_slot(asgn,user);
-
         let status = slot.status().unwrap();
         let lateness = status.versus(asgn.due_date.as_ref());
 
@@ -458,21 +536,7 @@ impl Context
         ]
     }
 
-    fn offset_date(date : Option<&DateTime<Local>>, offset : i64 ) -> Result<Option<DateTime<Local>>,FailLog>
-    {
-        if let Some(date) = date.as_ref() {
-            let offset_date = if offset >= 0 {
-                date.checked_add_days(Days::new(offset as u64))
-            } else {
-                date.checked_sub_days(Days::new((-offset) as u64))
-            }.ok_or(FailInfo::IOFail(format!("Extended date out of valid range.")))?;
-            Ok(Some(offset_date))
-        } else {
-            Ok(None)
-        }
-    }
-
-    pub fn student_summary_row(&self, asgn: &AsgnSpec, user: &OsString) -> Result<Vec<String>,FailLog> {
+    pub fn normal_summary_row(&self, asgn: &AsgnSpec, user: &OsString) -> Result<Vec<String>,FailLog> {
         let sub_dir = self.base_path.join(&asgn.name).join(user);
 
         let slot = SubmissionSlot {
@@ -488,6 +552,9 @@ impl Context
         let bump = extension+grace;
 
         let ext_due_date = Self::offset_date(asgn.due_date.as_ref(),bump)?;
+        //if let Some(time) = ext_due_date {
+        //    println!(">>> {} + {} -> {}",asgn.due_date.as_ref().unwrap(),bump,time);
+        //}
         let lateness = status.versus(ext_due_date.as_ref());
 
         let bump : String = if bump != 0 {format!(" {:+}",bump)} else { String::new() };
@@ -537,22 +604,15 @@ impl Context
     }
 
 
-
-    pub fn summary(
-        &self,
-        instructor_mode: bool,
-        asgn: Option<&OsString>,
-        user: Option<&OsString>
-    ) -> Result<(),FailLog>
+    pub fn list_subs(&self, asgn: Option<&OsString>, user: Option<&OsString>)
+     -> Result<(),FailLog>
     {
+        let header : Vec<String> = ["ASSIGNMENT","USER", "SUBMISSION STATUS", "EXTENSION", "GRACE"]
+            .iter().map(|s| s.to_string()).collect();
 
-        let header : Vec<String> = if instructor_mode {
-            ["ASSIGNMENT","USER", "SUBMISSION STATUS", "EXTENSION", "GRACE"]
-            .iter().map(|s| s.to_string()).collect()
-        } else {
-            ["ASSIGNMENT", "STATUS", "DUE DATE", "SUBMISSION STATUS", "FILES"]
-            .iter().map(|s| s.to_string()).collect()
-        };
+        let mut table = Table::new(header.len());
+        table.add_row(header)?;
+
 
         let asgn_list : Vec<&OsString> = if let Some(asgn_name) = asgn {
             if ! self.manifest.contains(asgn_name) {
@@ -572,21 +632,65 @@ impl Context
             self.members.iter().collect()
         };
 
-        let mut table = Table::new(header.len());
-        table.add_row(header)?;
-
         let body : Vec<Vec<String>> = asgn_list.iter()
             .filter_map(|name| self.catalog.get(name.clone()) )
             .filter_map(|asgn| asgn.as_ref().ok() )
-            .filter(|asgn| instructor_mode || asgn.visible)
             .cartesian_product(user_list.iter())
             .map(|(asgn,user)| {
-                if instructor_mode {
-                    self.instructor_summary_row(asgn, user)
-                } else {
-                    self.student_summary_row(asgn, user).unwrap()
-                }
+                self.submission_summary_row(asgn, user)
             }).collect();
+
+        for row in body.into_iter() {
+            table.add_row(row)?;
+        }
+
+        print!("{}",table.as_table());
+
+        Ok(())
+    }
+
+    pub fn list_asgns(&self)
+     -> Result<(),FailLog>
+    {
+        let header : Vec<String> = ["NAME", "STATUS", "ACTIVE", "VISIBLE", "DUE", "FILES"]
+            .iter().map(|s| s.to_string()).collect();
+
+        let mut table = Table::new(header.len());
+        table.add_row(header)?;
+
+
+        let body : Vec<Vec<String>> = self.manifest.iter()
+            .filter_map(|name| self.catalog.get(name) )
+            .filter_map(|asgn| asgn.as_ref().ok() )
+            .map(|asgn| {
+                self.assignment_summary_row(asgn)
+            }).collect();
+
+        for row in body.into_iter() {
+            table.add_row(row)?;
+        }
+
+        print!("{}",table.as_table());
+
+        Ok(())
+    }
+
+    pub fn summary(&self) -> Result<(),FailLog>
+    {
+
+        let header : Vec<String> = ["ASSIGNMENT", "STATUS", "DUE DATE", "SUBMISSION STATUS", "FILES"]
+                .iter().map(|s| s.to_string()).collect();
+
+        let mut table = Table::new(header.len());
+        table.add_row(header)?;
+
+        let body : Vec<Vec<String>> = self.manifest.iter()
+            .filter_map(|name| self.catalog.get(name) )
+            .filter_map(|asgn| asgn.as_ref().ok() )
+            .filter(|asgn| asgn.visible)
+            .map(|asgn| self.normal_summary_row(asgn,&self.user))
+            .filter_map(|row| row.ok())
+            .collect();
 
         for row in body.into_iter() {
             table.add_row(row)?;

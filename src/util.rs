@@ -13,9 +13,7 @@ use std::
     },
     io::Write,
     os::unix::
-    {
-        ffi::OsStringExt,
-    },
+    ffi::OsStringExt,
     path::{
         Path,
         PathBuf,
@@ -29,18 +27,21 @@ use std::
 };
 
 
-use crate::
+use crate::fail_info::
 {
-    fail_info::
-    {
-        FailInfo,
-        FailLog,
-    }
+    FailInfo,
+    FailLog,
 };
 
+use toml;
 use termion::terminal_size;
 use colored::Colorize;
 use walkdir::WalkDir;
+use chrono::{
+    TimeZone,
+    Datelike,
+    Timelike,
+};
 
 pub fn print_hline () {
     if let Ok((w,_h)) = terminal_size() {
@@ -204,12 +205,14 @@ pub fn refresh_file
 {
     let path = path.as_ref();
 
+    /*
     if path.exists() && path.is_dir() {
         fs::remove_dir_all(path)
             .map_err(|err| -> FailLog {
                 FailInfo::IOFail(format!("removing directory {} : {}",path.display(),err)).into()
             })?;
     }
+    */
 
     if ! path.exists() {
         fs::write(path,default_text)
@@ -235,12 +238,14 @@ pub fn refresh_dir
 
     let path = path.as_ref();
 
+    /*
     if path.exists() && path.is_file() {
         fs::remove_file(path)
             .map_err(|err| -> FailLog {
                 FailInfo::IOFail(format!("removing file {} : {}",path.display(),err)).into()
             })?;
     }
+    */
 
     if ! path.exists() {
         fs::create_dir(path)
@@ -267,6 +272,11 @@ pub fn recursive_refresh_dir
     facl: E,
 ) -> Result<(),FailLog>
 {
+    if ! path.as_ref().exists() {
+        refresh_dir(path.clone(),mode,facl.clone())?;
+        return Ok(());
+    }
+
     if path.as_ref().is_file() {
         return refresh_file(path.clone(),mode,String::new());
     } else if path.as_ref().is_dir() {
@@ -338,4 +348,75 @@ pub fn make_fresh_dir(path : &Path, base_name : &str)
 }
 
 
+
+pub fn date_into_chrono(deadline : toml::value::Datetime) -> Result<chrono::DateTime<chrono::Local>,FailLog> {
+    let (hr,min,sec) : (u32,u32,u32) = if let Some (time) = deadline.time {
+        (time.hour.into(),time.minute.into(),time.second.into())
+    } else {
+        (23,59,59)
+    };
+
+    let result = match deadline.date {
+        Some(date) => {
+            let y : i32 = date.year  as i32;
+            let m : u32 = date.month as u32;
+            let d : u32 = date.day   as u32;
+            Ok(chrono::offset::Local.with_ymd_and_hms(y,m,d,hr,min,sec).unwrap())
+        },
+        None       => {
+            Err(FailInfo::BadSpec(
+                "assignment".to_string(),
+                String::from("Date data missing from deadline field.")
+            ).into_log())
+        },
+    };
+    let result = result?;
+    //println!("-> {} <- ",result);
+    Ok(result)
+}
+
+
+
+pub fn date_from_chrono(deadline : chrono::DateTime<chrono::Local>) -> toml::value::Datetime{
+    let date_naive = deadline.date_naive();
+    let time = deadline.time();
+    toml::value::Datetime {
+        date: Some(toml::value::Date{
+            year  : date_naive.year()  as u16,
+            month : date_naive.month() as u8,
+            day   : date_naive.day()   as u8,
+        }),
+        time: Some(toml::value::Time{
+            hour   : time.hour()   as u8,
+            minute : time.minute() as u8,
+            second : time.second() as u8,
+            nanosecond : 0,
+        }),
+        offset: None,
+    }
+}
+
+pub fn parse_from<T : serde::de::DeserializeOwned > (path : &Path) -> Result<T,FailLog> {
+    let text = fs::read_to_string(path)
+        .map_err(|err| -> FailLog {
+            FailInfo::IOFail(format!("reading file : {}",err)).into()
+        })?;
+    let result = toml::from_str(&text)
+        .map_err(|err| -> FailLog {
+            FailInfo::IOFail(format!("deserializing file : {}",err)).into()
+        });
+    result
+}
+
+
+pub fn serialize_into<T : serde::ser::Serialize > (path : &Path, value : &T) -> Result<(),FailLog> {
+    let toml_text  = toml::to_string(value)
+        .map_err( |err| -> FailLog {
+            FailInfo::IOFail(format!("serializing extension file : {}",err)).into()
+        })?;
+    fs::write(path,toml_text)
+        .map_err(|err| -> FailLog {
+            FailInfo::IOFail(format!("writing extension file : {}",err)).into()
+        })
+}
 

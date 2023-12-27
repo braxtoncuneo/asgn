@@ -17,6 +17,8 @@ use crate::
     {
         AsgnSpec,
         Ruleset,
+        StatBlock,
+        StatBlockSet,
     },
     context::{
         Context,
@@ -195,10 +197,12 @@ impl StudentAct
             ).into_log())
     }
 
-    fn rank_specialized<T: FromStr + std::cmp::PartialOrd>(
+    fn rank_specialized<T: FromStr + std::cmp::PartialOrd >(
         asgn: &AsgnSpec, ruleset: &Ruleset, rule_name: &str,
         up: bool, context: &Context
-    ) -> Result<(),FailLog>
+    )
+    -> Result<(),FailLog>
+    where <T as FromStr>::Err : std::fmt::Debug
     {
 
         let score_names : Vec<String> = ruleset.rules.iter().map(|r|r.target.clone()).collect();
@@ -206,35 +210,30 @@ impl StudentAct
         header.extend(score_names.iter().cloned());
 
         let mut table : Table = Table::new(header.len());
-        table.add_row(header)?;
+        table.add_row(header.clone())?;
 
 
         let mut rows : Vec<(Option<T>,Vec<Option<String>>)> = Vec::new();
 
-        let base_path = asgn.path.join(".info").join("ranking");
+        let base_path = asgn.path.join(".info").join("score.toml");
+        let scores = util::parse_from::<StatBlockSet>(&base_path)?;
 
         for member in context.members.iter() {
-            let member = member.to_string_lossy().to_string();
-            let member_path = base_path.join(member.clone());
-            let main_score_path = member_path.join(rule_name.clone());
-            let score   = if main_score_path.exists() {
-                Some(Self::read_score(asgn,&member,rule_name)?)
+            let member_name = member.clone().into_string().unwrap();
+            let stat_block = scores.get_block(&member_name);
+            let mut row = vec![Some(member.clone().into_string().unwrap())];
+            if let Some(stat_block) = stat_block {
+                let score : Option<T> = stat_block.scores.get(rule_name)
+                    .map(|v|v.to_string().parse::<T>().unwrap());
+                for rule in ruleset.rules.iter() {
+                    row.push(stat_block.scores.get(&rule.target).map(|v|v.to_string()));
+                }
+                rows.push((score,row));
             } else {
-                None
+                row.resize_with(header.len(),||None);
+                continue;
             };
-            let mut row = vec![Some(member.clone())];
-            for rule in ruleset.rules.iter() {
-                let name = rule.target.clone();
-                let score_path = member_path.join(name);
-                let text = if score_path.exists() {
-                    Some(fs::read_to_string(score_path)
-                        .map_err(|err|FailInfo::IOFail(format!("{}",err)).into_log())?)
-                } else {
-                    None
-                };
-                row.push(text);
-            }
-            rows.push((score,row));
+
         }
 
         rows.sort_by(|(a,_), (b,_)| {
@@ -291,7 +290,6 @@ impl StudentAct
             return Err(FailInfo::IOFail("No score kind given.".to_string()).into_log());
         };
 
-        println!("{}",kind);
         match kind.as_str() {
             "bool"  => Self::rank_specialized::<bool>(spec, ruleset, rule_name, up, context),
             "int"   => Self::rank_specialized::<i64>(spec, ruleset, rule_name, up, context),
@@ -338,17 +336,21 @@ impl StudentAct
         }
         log.result()?;
 
+        util::print_bold_hline();
         println!("{}",format!("Assignment '{}' submitted!",asgn_name.to_string_lossy()).green());
 
-        if ! spec.run_on_submit(context,spec.build.as_ref(),&sub_dir,"Building") {
+        let build_result = spec.run_on_submit(context,spec.build.as_ref(),&sub_dir,"Building",false);
+        if build_result.map(|opt|opt.is_err()).unwrap_or(false) {
             return Ok(());
         }
 
-        if ! spec.run_on_submit(context,spec.check.as_ref(),&sub_dir,"Evaluating Checks") {
+        let check_result = spec.run_on_submit(context,spec.check.as_ref(),&sub_dir,"Evaluating Checks",false);
+        if check_result.map(|opt|opt.is_err()).unwrap_or(false) {
             return Ok(());
         }
 
-        if ! spec.run_on_submit(context,spec.score.as_ref(),&sub_dir,"Evaluating Scores") {
+        let score_result = spec.run_on_submit(context,spec.score.as_ref(),&sub_dir,"Evaluating Scores",false);
+        if score_result.map(|opt|opt.is_err()).unwrap_or(false) {
             return Ok(());
         }
         util::print_bold_hline();
@@ -371,11 +373,8 @@ impl StudentAct
             return Err(FailInfo::NoSetup(asgn_name.clone()).into());
         }
 
-        let mut index = 0;
-        while context.cwd.join(format!("{}_setup.{}",asgn_name.to_string_lossy(),index)).exists() {
-            index += 1;
-        }
-        let dst_dir = context.cwd.join(format!("{}_setup.{}",asgn_name.to_string_lossy(),index));
+        let setup_name = format!("{}_setup",asgn_name.to_string_lossy());
+        let dst_dir = util::make_fresh_dir(&context.cwd,&setup_name);
 
         StudentAct::copy_dir(dst_dir,setup_dir)
     }
@@ -391,11 +390,8 @@ impl StudentAct
 
         let sub_dir = context.base_path.join(asgn_name).join(&context.user);
 
-        let mut index = 0;
-        while context.cwd.join(format!("recovery.{}",index)).exists() {
-            index += 1;
-        }
-        let dst_dir = context.cwd.join(format!("recovery.{}",index));
+        let recovery_name = format!("{}_recovery",asgn_name.to_string_lossy());
+        let dst_dir = util::make_fresh_dir(&context.cwd,&recovery_name);
 
         fs::create_dir_all(&dst_dir)
             .map_err(|err| -> FailLog {FailInfo::IOFail(err.to_string()).into()})?;
@@ -456,7 +452,7 @@ impl StudentAct
             Submit  { asgn_name }  => Self::submit (asgn_name,context),
             Setup   { asgn_name }  => Self::setup  (asgn_name,context),
             Recover { asgn_name }  => Self::recover(asgn_name,context),
-            Summary {}             => context.summary(false,None,Some(&context.user)),
+            Summary {}             => context.summary(),
             Details { asgn_name }  => Self::details(asgn_name,context),
             Grace   {asgn,ext}     => Self::grace(asgn,&context.user,*ext,context),
             Alias   { alias_name } => Self::alias(alias_name,context),

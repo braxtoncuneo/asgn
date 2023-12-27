@@ -102,7 +102,7 @@ impl GraderAct
             .as_ref().map_err(|err| err.clone() )?;
 
         let cwd = context.cwd.clone();
-        let _ = spec.run_ruleset(context,spec.build.as_ref(),&cwd).is_err();
+        let _ = spec.run_ruleset(context,spec.build.as_ref(),&cwd,false).is_err();
 
         Ok(())
     }
@@ -114,17 +114,21 @@ impl GraderAct
             .as_ref().map_err(|err| err.clone() )?;
         let cwd = context.cwd.clone();
 
-        if ! spec.run_on_grade(context,spec.check.as_ref(),&cwd,"Evaluating Checks") {
+        let check_result  = spec.run_on_grade(context,spec.check.as_ref(),&cwd,"Evaluating Checks",true);
+
+        if check_result.map(|opt|opt.is_err()).unwrap_or(false) {
             return Ok(());
         }
 
-        if ! spec.run_on_grade(context,spec.score.as_ref(),&cwd,"Evaluating Scores") {
+        let score_result = spec.run_on_grade(context,spec.score.as_ref(),&cwd,"Evaluating Scores",true);
+
+        if score_result.map(|opt|opt.is_err()).unwrap_or(false) {
             return Ok(());
         }
 
         util::print_bold_hline();
         println!("{}","Evaluating Grades".yellow().bold());
-        let _ = spec.run_ruleset(context,spec.grade.as_ref(),&cwd).is_err();
+        let _ = spec.run_ruleset(context,spec.grade.as_ref(),&cwd,true);
 
         util::print_bold_hline();
 
@@ -140,7 +144,7 @@ impl GraderAct
         util::print_bold_hline();
         println!("{}","Evaluating Checks".yellow().bold());
         let cwd = context.cwd.clone();
-        let _ = spec.run_ruleset(context,spec.check.as_ref(),&cwd).is_err();
+        let _ = spec.run_ruleset(context,spec.check.as_ref(),&cwd,true).is_err();
         util::print_bold_hline();
 
         Ok(())
@@ -155,7 +159,7 @@ impl GraderAct
         util::print_bold_hline();
         println!("{}","Evaluating Scores".yellow().bold());
         let cwd = context.cwd.clone();
-        let _ = spec.run_ruleset(context,spec.score.as_ref(),&cwd).is_err();
+        let _ = spec.run_ruleset(context,spec.score.as_ref(),&cwd,true).is_err();
         util::print_bold_hline();
 
         Ok(())
@@ -176,15 +180,18 @@ impl GraderAct
 
         spec.retrieve_sub(&dst_dir,&user_name.to_string_lossy())?;
 
-        if ! spec.run_on_submit(context,spec.build.as_ref(),&dst_dir,"Building") {
+        let build_result = spec.run_on_submit(context,spec.build.as_ref(),&dst_dir,"Building",false);
+        if build_result.map(|opt|opt.is_err()).unwrap_or(false) {
             return Ok(());
         }
 
-        if ! spec.run_on_submit(context,spec.check.as_ref(),&dst_dir,"Evaluating Checks") {
+        let check_result = spec.run_on_submit(context,spec.check.as_ref(),&dst_dir,"Evaluating Checks",true);
+        if check_result.map(|opt|opt.is_err()).unwrap_or(false) {
             return Ok(());
         }
 
-        if ! spec.run_on_submit(context,spec.score.as_ref(),&dst_dir,"Evaluating Scores") {
+        let score_result = spec.run_on_submit(context,spec.score.as_ref(),&dst_dir,"Evaluating Scores",true);
+        if score_result.map(|opt|opt.is_err()).unwrap_or(false) {
             return Ok(());
         }
         util::print_bold_hline();

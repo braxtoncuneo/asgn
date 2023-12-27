@@ -29,8 +29,6 @@ use serde_derive::
 use chrono::
 {
     DateTime,
-    Datelike,
-    Timelike,
     Local,
     TimeZone,
     Duration,
@@ -72,6 +70,20 @@ pub struct Ruleset {
     pub on_submit : Option<bool>,
     pub fail_okay : Option<bool>,
     pub rules     : Vec<Rule>,
+}
+
+
+
+#[derive(Serialize,Deserialize,Clone,Debug)]
+pub struct StatBlock {
+    pub user   : String,
+    pub time   : toml::value::Datetime,
+    pub scores : toml::value::Table,
+}
+
+#[derive(Serialize,Deserialize,Clone,Debug,Default)]
+pub struct StatBlockSet {
+    pub stat_block : Option<Vec<StatBlock>>
 }
 
 
@@ -151,49 +163,6 @@ pub struct AsgnSpec
 impl AsgnSpec
 {
 
-    pub fn date_into_chrono(deadline : toml::value::Datetime) -> Result<chrono::DateTime<Local>,FailLog> {
-        let (hr,min,sec) : (u32,u32,u32) = if let Some (time) = deadline.time {
-            (time.hour.into(),time.minute.into(),time.second.into())
-        } else {
-            (23,59,59)
-        };
-
-        match deadline.date {
-            Some(date) => {
-                let y : i32 = date.year  as i32;
-                let m : u32 = date.month as u32;
-                let d : u32 = date.day   as u32;
-                Ok(chrono::offset::Local.with_ymd_and_hms(y,m,d,hr,min,sec).unwrap())
-            },
-            None       => {
-                return Err(FailInfo::BadSpec(
-                    "assignment".to_string(),
-                    String::from("Date data missing from deadline field.")
-                ).into())
-            },
-        }
-    }
-
-    pub fn date_from_chrono(deadline : chrono::DateTime<Local>) -> toml::value::Datetime{
-        let date_naive = deadline.date_naive();
-        let time = deadline.time();
-        toml::value::Datetime {
-            date: Some(toml::value::Date{
-                year  : date_naive.year()  as u16,
-                month : date_naive.month() as u8,
-                day   : date_naive.day()   as u8,
-            }),
-            time: Some(toml::value::Time{
-                hour   : time.hour()   as u8,
-                minute : time.minute() as u8,
-                second : time.second() as u8,
-                nanosecond : 0,
-            }),
-            offset: None,
-        }
-    }
-
-
     pub fn load <P : AsRef<Path>> (path : P) -> Result<Self,FailLog>
     {
         let path : &Path = path.as_ref();
@@ -205,7 +174,8 @@ impl AsgnSpec
         let info_text = read_to_string(info_path)
             .map_err(|err|  -> FailLog {
                 FailInfo::NoSpec(
-                    "assignment".to_string(),
+                    path.file_name().map(|os|os.to_string_lossy().to_string())
+                        .unwrap_or("assignment".to_string()),
                     format!("{}",err)
                 ).into()
             })?;
@@ -219,19 +189,19 @@ impl AsgnSpec
             })?;
 
         let open_date = if let Some(date) = spec_toml.open_date {
-            Some(Self::date_into_chrono(date)?)
+            Some(util::date_into_chrono(date)?)
         } else {
             None
         };
 
         let close_date = if let Some(date) = spec_toml.close_date {
-            Some(Self::date_into_chrono(date)?)
+            Some(util::date_into_chrono(date)?)
         } else {
             None
         };
 
         let due_date = if let Some(date) = spec_toml.due_date {
-            Some(Self::date_into_chrono(date)?)
+            Some(util::date_into_chrono(date)?)
         } else {
             None
         };
@@ -269,9 +239,9 @@ impl AsgnSpec
             name       : self.name.clone(),
             active     : self.active,
             visible    : self.visible,
-            due_date   : self.due_date.map(Self::date_from_chrono),
-            open_date  : self.open_date.map(Self::date_from_chrono),
-            close_date : self.close_date.map(Self::date_from_chrono),
+            due_date   : self.due_date.map(util::date_from_chrono),
+            open_date  : self.open_date.map(util::date_from_chrono),
+            close_date : self.close_date.map(util::date_from_chrono),
             file_list  : util::stringify_osstr_vec(&self.file_list),
             build : self.build.clone(),
             check : self.check.clone(),
@@ -413,6 +383,10 @@ impl AsgnSpec
             let pass_text = format!("! {}", pass_text)
                 .green();
             println!("{}",pass_text);
+            let target = path.join(&rule.target);
+            if target.exists() {
+                let _ = util::refresh_file(target, 0o777, String::new());
+            }
             Ok(true)
         } else {
             let fail_text = rule.fail_text.clone()
@@ -437,11 +411,38 @@ impl AsgnSpec
     }
 
 
-    pub fn run_ruleset(&self, context: &Context, ruleset : Option<&Ruleset>, path: &Path) -> Result<(),()>
+    fn log_metric(scores : &mut toml::value::Table, target : &str, result : &str, kind : &str)
     {
+        let score = match kind {
+            "bool"  => result.parse::<bool>().map(|v| toml::Value::Boolean(v)).ok(),
+            "int"   => result.parse::<i64>().map(|v|toml::Value::Integer(v)).ok(),
+            "float" => result.parse::<f64>().map(|v|toml::Value::Float(v)).ok(),
+            _ => {
+                println!("{}",format!("! Metric '{}' has invalid kind '{}'",target,kind).red());
+                return;
+            },
+        };
+        if let Some(score) = score {
+            scores.insert(target.to_string(),score);
+            println!("{}",format!("Metric '{}' had value '{}'",target,result).yellow().bold());
+        } else {
+            println!("{}",format!(
+                "Metric '{}' had result '{}' which could not be parsed into kind '{}'",
+                target, result, kind
+            ).red());
+        }
+    }
+
+
+    pub fn run_ruleset(&self, context: &Context, ruleset : Option<&Ruleset>, path: &Path, is_metric : bool)
+    -> Result<toml::value::Table,()>
+    {
+
+        let mut scores = toml::value::Table::default();
+
         if ruleset.is_none() {
             println!("{}","No targets.".yellow());
-            return Ok(())
+            return Ok(scores)
         }
 
         let rules = ruleset.as_ref().unwrap();
@@ -454,10 +455,12 @@ impl AsgnSpec
             let mut rule = rule.clone();
             rule.fail_okay.get_or_insert(rules.fail_okay.unwrap_or(false));
             util::print_hline();
+            let mut did_pass : bool = false;
             match self.run_rule(context,&rule,path) {
                 Ok(pass) => {
                     if pass {
                         passed += 1;
+                        did_pass = true;
                     } else {
                         failed += 1;
                     }
@@ -468,9 +471,20 @@ impl AsgnSpec
                     break;
                 }
             }
+            if did_pass && is_metric {
+                let result = read_to_string(path.join(&rule.target))
+                    .map_err(|err| FailInfo::IOFail(format!("Failed to read score : '{}'",err)).into_log());
+                match (rule.kind.as_ref(), result) {
+                    (Some(kind),Ok(result)) => Self::log_metric(&mut scores,&rule.target,&result,&kind),
+                    (None,Ok(_result)) => {
+                        println!("{}",format!("! Metric '{}' has no kind.",&rule.target).red());
+                    }
+                    (_,Err(log))   => print!("{}",log),
+                }
+            }
         }
         if fatal {
-            println!("{}",format!("! {}","Execution cannot continue beyond this error.").red())
+            println!("{}",format!("! {}","Execution cannot continue beyond this error.").red());
         }
         util::print_hline();
         println!("{} - {}, {}, {}.",
@@ -479,38 +493,38 @@ impl AsgnSpec
             format!("{} failed",failed),
             format!("{} not reached",count-passed-failed)
         );
-        Ok(())
+        if fatal {
+            Err(())
+        } else {
+            Ok(scores)
+        }
     }
 
 
-    pub fn run_on_submit(&self, context: &Context, ruleset : Option<&Ruleset>, path: &Path, title: &str)
-    -> bool
+    pub fn run_on_submit(&self, context: &Context, ruleset : Option<&Ruleset>, path: &Path, title: &str, is_metric: bool)
+    -> Option<Result<toml::value::Table,()>>
     {
         if let Some(set) = ruleset {
             if set.on_submit.unwrap_or(true) {
                 util::print_bold_hline();
                 println!("{}",title.yellow().bold());
-                if self.run_ruleset(context,Some(set),path).is_err() {
-                    return false;
-                }
+                return Some(self.run_ruleset(context,Some(set),path,is_metric));
             }
         }
-        return true;
+        return None;
     }
 
-    pub fn run_on_grade(&self, context: &Context, ruleset : Option<&Ruleset>, path: &Path, title: &str)
-    -> bool
+    pub fn run_on_grade(&self, context: &Context, ruleset : Option<&Ruleset>, path: &Path, title: &str, is_metric: bool)
+    -> Option<Result<toml::value::Table,()>>
     {
         if let Some(set) = ruleset {
             if set.on_grade.unwrap_or(true) {
                 util::print_bold_hline();
                 println!("{}",title.yellow().bold());
-                if self.run_ruleset(context,Some(set),path).is_err() {
-                    return false;
-                }
+                return Some(self.run_ruleset(context,Some(set),path,is_metric));
             }
         }
-        return true;
+        return None;
     }
 
     pub fn retrieve_sub(&self, dst_dir : &Path, user_name : &str)
@@ -752,6 +766,9 @@ impl SubmissionStatus {
             }
         };
 
+        //println!("due_date     : {}",time);
+        //println!("turn_in_time : {}",self.turn_in_time.map(|t|t.to_string()).unwrap_or("None".to_string()));
+
         let late_by = self.time_past(time);
 
         if late_by.is_none() {
@@ -782,6 +799,25 @@ impl SubmissionStatus {
         }
     }
 
+
+}
+
+
+
+
+impl StatBlockSet {
+
+
+    pub fn get_block(&self, user : &str) -> Option<&StatBlock>
+    {
+        if let Some(list) = self.stat_block.as_ref() {
+            list.iter()
+            .filter(|block| block.user == user)
+            .next()
+        } else {
+            None
+        }
+    }
 
 }
 

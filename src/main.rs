@@ -144,7 +144,9 @@ fn main()
     }
 
     if let Role::Instructor = &context.role {
-        context.print_failures();
+        if args.peek() != Some(&"refresh".to_string()) {
+            context.print_failures();
+        }
     }
 
     /*
