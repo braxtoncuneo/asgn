@@ -498,7 +498,7 @@ impl InstructorAct
                 log.extend(err);
             }
         }
-        if ! log.empty() {
+        if ! log.is_empty() {
             print!("{}",log);
         }
         Ok(())
@@ -514,8 +514,8 @@ impl InstructorAct
             //AuditAll {}              => Self::audit_all(context),
             ListAsgns   {}             => context.list_asgns(),
             ListSubs    {asgn,user}    => context.list_subs(
-                asgn.as_ref().unwrap_or(&None).as_ref(),
-                user.as_ref().unwrap_or(&None).as_ref(),
+                asgn.as_ref().unwrap_or(&None).as_deref(),
+                user.as_ref().unwrap_or(&None).as_deref(),
             ),
             AddStudents {user_names}   => Self::add_students(user_names,context),
             RemStudents {user_names}   => Self::remove_students(user_names,context),
@@ -544,4 +544,3 @@ impl InstructorAct
     }
 
 }
-

@@ -334,7 +334,7 @@ impl StudentAct
                 })?;
             util::set_mode(&dst_path,0o777)?;
         }
-        log.result()?;
+        log.into_result()?;
 
         util::print_bold_hline();
         println!("{}",format!("Assignment '{}' submitted!",asgn_name.to_string_lossy()).green());
@@ -410,7 +410,7 @@ impl StudentAct
                     (&src_path).display(),(&dst_path).display(),err)).into_log()
                 })?;
         }
-        log.result()
+        log.into_result()
 
     }
 
@@ -462,5 +462,3 @@ impl StudentAct
     }
 
 }
-
-
