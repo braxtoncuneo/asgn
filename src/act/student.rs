@@ -316,15 +316,15 @@ impl StudentAct
             let src_path = src_dir.join(file_name);
             let dst_path = sub_dir.join(file_name);
             if ! src_path.exists() {
-                log.push(FailInfo::MissingFile(file_name.clone()).into());
+                log.push(FailInfo::MissingFile(OsString::from(file_name)).into());
                 continue;
             }
             if src_path.is_dir() {
-                log.push(FailInfo::FileIsDir(file_name.clone()).into());
+                log.push(FailInfo::FileIsDir(OsString::from(file_name)).into());
                 continue;
             }
             if ! src_path.is_file() {
-                log.push(FailInfo::FileIsOther(file_name.clone()).into());
+                log.push(FailInfo::FileIsOther(OsString::from(file_name)).into());
                 continue;
             }
             fs::copy(&src_path,&dst_path)
@@ -401,7 +401,7 @@ impl StudentAct
             let src_path = sub_dir.join(file_name);
             let dst_path = dst_dir.join(file_name);
             if ! src_path.exists() {
-                log.push(FailInfo::MissingSub(file_name.clone()).into());
+                log.push(FailInfo::MissingSub(OsString::from(file_name)).into());
                 continue;
             }
             fs::copy(&src_path,&dst_path)
@@ -423,7 +423,7 @@ impl StudentAct
             context.exe_path.clone().into_os_string().into_string().unwrap(),
             context.base_path.clone().into_os_string().into_string().unwrap()
         );
-        bashrc_append_line(line)?;
+        bashrc_append_line(&line)?;
         println!("{}","Alias installed successfully.".yellow());
         println!("{}","The alias will take effect automatically for future shell sessions.".yellow());
         println!("{}","\nTo have it take effect for this shell session, run this command:".yellow());
