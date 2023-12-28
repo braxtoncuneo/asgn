@@ -386,24 +386,13 @@ impl Context {
             }
         };
 
-        let file_list: String = asgn.file_list.iter()
-            .enumerate()
-            .fold(String::new(), |acc,(idx,text)| {
-                let text = text.to_str().unwrap();
-                if idx == 0 {
-                    text.to_owned()
-                } else {
-                    format!("{}  {}", acc, text)
-                }
-            });
-
         vec![
             asgn.name.clone(),
             status.to_string(),
             active.to_string(),
             visible.to_string(),
             naive_due_date,
-            file_list,
+            asgn.file_list.iter().join("  "),
         ]
     }
 
@@ -447,16 +436,6 @@ impl Context {
             else if asgn.after_close() { "AFTER CLOSE" }
             else { "ENABLED" };
 
-        let file_list: String = asgn.file_list.iter()
-            .enumerate()
-            .fold(String::new(),|acc,(idx,text)| {
-                let text = text.to_str().unwrap();
-                if idx == 0 {
-                    text.to_owned()
-                } else {
-                    format!("{}  {}", acc, text)
-                }
-            });
 
         let naive_due_date = match due_date {
             None => "NONE".to_owned(),
@@ -471,10 +450,10 @@ impl Context {
 
         Ok(vec![
             asgn.name.clone(),
-            active.to_string(),
+            active.to_owned(),
             naive_due_date,
-            lateness.to_string(),
-            file_list.to_string()
+            lateness,
+            asgn.file_list.iter().join("  ")
         ])
     }
 
@@ -517,7 +496,7 @@ impl Context {
             table.add_row(row)?;
         }
 
-        print!("{}", table.as_table());
+        print!("{table}");
 
         Ok(())
     }
@@ -541,7 +520,7 @@ impl Context {
             table.add_row(row)?;
         }
 
-        print!("{}", table.as_table());
+        print!("{table}");
 
         Ok(())
     }
@@ -574,7 +553,7 @@ impl Context {
             print!("GRACE SPENT: {}\n",self.grace_spent());
         }
 
-        print!("{}", table.as_table());
+        print!("{table}");
 
         Ok(())
     }
@@ -596,7 +575,7 @@ impl Context {
 
                 status.grace_days
             })
-            .fold(0,|acc,val| acc + val)
+            .sum()
     }
 }
 

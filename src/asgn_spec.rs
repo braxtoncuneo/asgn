@@ -234,7 +234,7 @@ impl AsgnSpec {
         }).unwrap_or(false)
     }
 
-    pub fn details(&self, context: &Context) -> Result<String,FailLog> {
+    pub fn details(&self, context: &Context) -> Result<Table, FailLog> {
         let sub_dir = context.base_path.join(&self.name).join(&context.user);
 
         let slot = SubmissionSlot {
@@ -264,7 +264,7 @@ impl AsgnSpec {
         table.add_row(vec!["EXTENSION".to_string(), status.extension_days.to_string()])?;
         table.add_row(vec!["GRACE".to_string(), status.grace_days.to_string()])?;
 
-        Ok(table.as_table())
+        Ok(table)
     }
 
     pub fn make_command(&self, target: &str, quiet: bool, context: &Context) -> std::process::Command {

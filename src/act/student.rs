@@ -256,7 +256,7 @@ impl StudentAct
             table.add_row(row)?;
         }
 
-        print!("{}",table.as_table());
+        print!("{table}");
 
         Ok(())
     }
@@ -440,7 +440,7 @@ impl StudentAct
             return Err(FailInfo::InvalidAsgn(asgn_name.clone()).into_log());
         }
 
-        print!("{}",spec.details(context)?);
+        print!("{}", spec.details(context)?);
         Ok(())
     }
 
