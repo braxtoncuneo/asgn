@@ -88,9 +88,9 @@ impl Context {
         let course_file_path = self.base_path.join(".info").join("course.toml");
 
         let course_toml = CourseToml {
-            manifest: util::stringify_osstr_vec(&self.manifest),
-            graders:  util::stringify_osstr_vec(&self.graders),
-            students: util::stringify_osstr_vec(&self.students),
+            manifest: self.manifest.iter().cloned().map(|o| o.into_string().unwrap()).collect(),
+            graders:  self.graders .iter().cloned().map(|o| o.into_string().unwrap()).collect(),
+            students: self.students.iter().cloned().map(|o| o.into_string().unwrap()).collect(),
             grace_total : self.grace_total,
             grace_limit : self.grace_limit,
         };

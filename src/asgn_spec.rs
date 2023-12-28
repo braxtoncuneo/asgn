@@ -213,7 +213,7 @@ impl AsgnSpec
             due_date,
             open_date,
             close_date,
-            file_list  : util::osify_string_vec(&spec_toml.file_list),
+            file_list  : spec_toml.file_list.iter().cloned().map(OsString::from).collect(),
             build      : spec_toml.build,
             check      : spec_toml.check,
             grade      : spec_toml.grade,
@@ -242,7 +242,7 @@ impl AsgnSpec
             due_date   : self.due_date.map(util::date_from_chrono),
             open_date  : self.open_date.map(util::date_from_chrono),
             close_date : self.close_date.map(util::date_from_chrono),
-            file_list  : util::stringify_osstr_vec(&self.file_list),
+            file_list  : self.file_list.iter().cloned().map(|o| o.into_string().unwrap()).collect(),
             build : self.build.clone(),
             check : self.check.clone(),
             grade : self.grade.clone(),
@@ -820,4 +820,3 @@ impl StatBlockSet {
     }
 
 }
-

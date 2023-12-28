@@ -2,17 +2,9 @@
 use structopt::StructOpt;
 use std::ffi::OsString;
 
-use crate::
-{
-    context::Context,
-    fail_info::
-    {
-        FailLog,
-    },
-    util::bashrc_append_line,
-};
+use crate::{context::Context, fail_info::FailLog, util::bashrc_append_line};
 
-#[derive(Debug,StructOpt)]
+#[derive(Debug, StructOpt)]
 #[structopt(
     name       = "asgn",
     author     = "Braxton Cuneo",
@@ -20,8 +12,8 @@ use crate::
     version    = "0.0.1",
     rename_all = "snake",
 )]
-pub struct OtherCmd
-{
+
+pub struct OtherCmd {
     #[structopt(name = "base path")]
     base_path : OsString,
 
@@ -29,7 +21,7 @@ pub struct OtherCmd
     pub act: OtherAct,
 }
 
-#[derive(Debug,StructOpt)]
+#[derive(Debug, StructOpt)]
 #[structopt(rename_all = "snake")]
 pub enum OtherAct {
     #[structopt(about = "\"installs\" asgn by adding it to your path")]
@@ -37,23 +29,16 @@ pub enum OtherAct {
 }
 
 
-impl OtherAct
-{
-
-    fn install(context: &Context) -> Result<(),FailLog> {
-        let path_append : OsString = format!(
-            "PATH=\"{}:$PATH\"",
-            context.exe_path.parent().unwrap().display()
-        ).into();
-        bashrc_append_line(path_append.to_string_lossy())
+impl OtherAct {
+    fn install(context: &Context) -> Result<(), FailLog> {
+        let new_path = context.exe_path.parent().unwrap().to_str().unwrap();
+        let path_append = format!("PATH=\"{new_path}:$PATH\"");
+        bashrc_append_line(&path_append)
     }
 
-    pub fn execute(&self, context: &Context) -> Result<(),FailLog>
-    {
-        use OtherAct::*;
+    pub fn execute(&self, context: &Context) -> Result<(), FailLog> {
         match self {
-            Install  {} => Self::install (context),
+            OtherAct::Install {} => Self::install(context),
         }
     }
 }
-
