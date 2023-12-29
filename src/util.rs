@@ -128,11 +128,11 @@ pub fn write_file(path: impl AsRef<Path>, slice: impl AsRef<[u8]>) -> Result<(),
     )
 }
 
-pub fn refresh_file(path: impl AsRef<Path>, mode: u32, default_text: String) -> Result<(), FailLog> {
+pub fn refresh_file(path: impl AsRef<Path>, mode: u32, default_text: &str) -> Result<(), FailLog> {
     let path = path.as_ref();
 
     if !path.exists() {
-        fs::write(path,default_text).map_err(|err|
+        fs::write(path, default_text).map_err(|err|
             FailInfo::IOFail(format!("creating default file for {}: {}", path.display(), err)).into_log()
         )?;
     }
@@ -188,7 +188,7 @@ pub fn recursive_refresh_dir<'facl> (
     }
 
     if path.is_file() {
-        return refresh_file(path, mode, String::new());
+        return refresh_file(path, mode, "");
     } else if path.is_dir() {
         refresh_dir(path, mode, facl.clone())?;
     } else {

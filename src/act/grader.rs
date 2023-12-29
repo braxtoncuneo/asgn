@@ -73,10 +73,7 @@ pub enum GraderAct {
 
 impl GraderAct {
     fn build(asgn_name: &str, context: &Context) -> Result<(), FailLog> {
-        let spec: &AsgnSpec = context.catalog.get(asgn_name)
-            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log())?
-            .as_ref().map_err(Clone::clone)?;
-
+        let spec: &AsgnSpec = context.catalog_get(asgn_name)?;
         let cwd = context.cwd.clone();
         let _ = spec.run_ruleset(context,spec.build.as_ref(),&cwd,false).is_err();
 
@@ -84,9 +81,7 @@ impl GraderAct {
     }
 
     fn grade(asgn_name: &str, context: &Context) -> Result<(), FailLog> {
-        let spec: &AsgnSpec = context.catalog.get(asgn_name)
-            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log())?
-            .as_ref().map_err(|err| err.clone())?;
+        let spec = context.catalog_get(asgn_name)?;
         let cwd = context.cwd.clone();
 
         let check_result  = spec.run_on_grade(context,spec.check.as_ref(),&cwd,"Evaluating Checks",true);
@@ -111,9 +106,7 @@ impl GraderAct {
     }
 
     fn check(asgn_name: &str, context: &Context) -> Result<(),FailLog> {
-        let spec : &AsgnSpec = context.catalog.get(asgn_name)
-            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log())?
-            .as_ref().map_err(|err| err.clone())?;
+        let spec = context.catalog_get(asgn_name)?;
 
         util::print_bold_hline();
         println!("{}","Evaluating Checks".yellow().bold());
@@ -126,9 +119,7 @@ impl GraderAct {
 
     fn score(asgn_name: &str, context: &Context) -> Result<(),FailLog>
     {
-        let spec : &AsgnSpec = context.catalog.get(asgn_name)
-            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log())?
-            .as_ref().map_err(|err| err.clone() )?;
+        let spec = context.catalog_get(asgn_name)?;
 
         util::print_bold_hline();
         println!("{}","Evaluating Scores".yellow().bold());
@@ -141,9 +132,7 @@ impl GraderAct {
 
 
     pub fn copy(asgn_name: &str, user_name: &str, dst_dir: Option<&Path>, context: &Context) -> Result<(),FailLog> {
-        let spec: &AsgnSpec = context.catalog.get(asgn_name)
-            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log())
-            ?.as_ref().map_err(|err| err.clone() )?;
+        let spec = context.catalog_get(asgn_name)?;
 
         let dst_dir = dst_dir.unwrap_or(&context.cwd);
 

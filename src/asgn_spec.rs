@@ -323,7 +323,7 @@ impl AsgnSpec {
             println!("{pass_text}");
             let target = path.join(&rule.target);
             if target.exists() {
-                let _ = util::refresh_file(target, 0o777, String::new());
+                let _ = util::refresh_file(target, 0o777, "");
             }
 
             Ok(true)
@@ -462,10 +462,10 @@ impl AsgnSpec {
         return None;
     }
 
-    pub fn retrieve_sub(&self, dst_dir : &Path, user_name : &str)
+    pub fn retrieve_sub(&self, dst_dir : &Path, user : &str)
     -> Result<(),FailLog>
     {
-        let sub_path = self.path.join(user_name);
+        let sub_path = self.path.join(user);
 
         if dst_dir.is_dir() {
             fs::remove_dir_all(&dst_dir).map_err(|err|

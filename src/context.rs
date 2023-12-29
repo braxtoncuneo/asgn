@@ -107,10 +107,23 @@ impl Context {
 
     pub fn populate_catalog(&mut self) {
         for asgn_name in self.manifest.iter() {
-            let spec_path = self.base_path
-                .join(asgn_name);
+            let spec_path = self.base_path.join(asgn_name);
             self.catalog.insert(asgn_name.clone(), AsgnSpec::load(spec_path));
         }
+    }
+
+    pub fn catalog_get<'a>(&'a self, asgn_name: &str) -> Result<&'a AsgnSpec, FailLog> {
+        self.catalog.get(asgn_name)
+            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()))?
+            .as_ref()
+            .map_err(Clone::clone)
+    }
+
+    pub fn catalog_get_mut<'a>(&'a mut self, asgn_name: &str) -> Result<&'a mut AsgnSpec, FailLog> {
+        self.catalog.get_mut(asgn_name)
+            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()))?
+            .as_mut()
+            .map_err(|err| err.clone())
     }
 
     pub fn deduce(base_path: impl AsRef<Path>) -> Result<Self, FailLog> {
@@ -141,9 +154,6 @@ impl Context {
         let time = Local::now();
 
         let spec = Self::load(&base_path)?;
-        let manifest: Vec<_> = spec.manifest.clone();
-        let graders:  Vec<_> = spec.graders .clone();
-        let students: Vec<_> = spec.students.clone();
         let grace_total = spec.grace_total;
         let grace_limit = spec.grace_limit;
 
@@ -258,7 +268,7 @@ impl Context {
         let course_text = toml::to_string(&CourseToml::default()).unwrap();
 
         util::refresh_dir(&course_info_path, 0o755, iter::empty())?;
-        util::refresh_file(&course_file_path, 0o644, course_text)?;
+        util::refresh_file(&course_file_path, 0o644, &course_text)?;
 
         let dirs = [
             ("public",  0o755, Vec::new()),
@@ -274,22 +284,22 @@ impl Context {
     }
 
 
-    pub fn refresh_assignment(&self, asgn: &str) -> Result<(), FailLog> {
-        let asgn_path = self.base_path.join(asgn);
+    pub fn refresh_assignment(&self, asgn_name: &str) -> Result<(), FailLog> {
+        let asgn_path = self.base_path.join(asgn_name);
         util::refresh_dir(&asgn_path, 0o755, iter::empty())?;
 
         let asgn_spec_path = asgn_path.join(".info");
         util::refresh_dir(&asgn_spec_path, 0o755, iter::empty())?;
 
         let asgn_info_path = asgn_spec_path.join("info.toml");
-        let asgn_text = toml::to_string(&AsgnSpecToml::default_with_name(asgn.to_owned())).unwrap();
-        util::refresh_file(&asgn_info_path, 0o644, asgn_text)?;
+        let asgn_text = toml::to_string(&AsgnSpecToml::default_with_name(asgn_name.to_owned())).unwrap();
+        util::refresh_file(&asgn_info_path, 0o644, &asgn_text)?;
 
         let asgn_make_path = asgn_spec_path.join("Makefile");
-        util::refresh_file(&asgn_make_path, 0o644, String::new())?;
+        util::refresh_file(&asgn_make_path, 0o644, "")?;
 
         let asgn_make_path = asgn_spec_path.join("score.toml");
-        util::refresh_file(&asgn_make_path, 0o644, String::new())?;
+        util::refresh_file(&asgn_make_path, 0o644, "")?;
 
         let dirs = [
             ("public", 0o755, Vec::new()),
@@ -306,7 +316,7 @@ impl Context {
         util::recursive_refresh_dir(&internal_path, 0o700, iter::empty())?;
         util::recursive_refresh_dir(&score_build_path, 0o700, iter::empty())?;
 
-        let asgn_path = self.base_path.join(asgn);
+        let asgn_path = self.base_path.join(asgn_name);
 
         for member in self.members.iter() {
             let asgn_sub_path = asgn_path.join(member);
@@ -316,7 +326,7 @@ impl Context {
             util::refresh_dir(asgn_sub_path.clone(),0o700,facl_list.iter())?;
 
             let extension_path = asgn_sub_path.join(".extension");
-            util::refresh_file(extension_path,0o700,"value = 0".to_string())?;
+            util::refresh_file(extension_path,0o700,"value = 0")?;
         }
 
         Ok(())
@@ -595,7 +605,7 @@ pub fn init(base_path: impl AsRef<Path>) -> Result<(), FailLog> {
     util::refresh_dir(&info_path,0o755,iter::empty())?;
 
     let toml_path = info_path.join("course.toml");
-    util::refresh_file(&toml_path,0o755,toml::to_string(&CourseToml::default()).unwrap())?;
+    util::refresh_file(&toml_path,0o755,&toml::to_string(&CourseToml::default()).unwrap())?;
 
     let mut context = Context::deduce(&base_path)?;
     InstructorAct::Refresh{}.execute(&mut context)

@@ -16,7 +16,6 @@ use crate::
     {
         AsgnSpec,
         Ruleset,
-        StatBlock,
         StatBlockSet,
     },
     context::{
@@ -156,7 +155,7 @@ impl StudentAct
     }
 
 
-    pub fn grace(asgn: &str, user: &str, ext_days: i64, context : &Context) -> Result<(),FailLog> {
+    pub fn grace(asgn_name: &str, user: &str, ext_days: i64, context : &Context) -> Result<(),FailLog> {
         if context.grace_total.is_none() {
             return Err(FailInfo::NoGrace.into_log());
         } else if let Some(num) = context.grace_limit.as_ref() {
@@ -165,9 +164,7 @@ impl StudentAct
             }
         }
 
-        let spec : &AsgnSpec = context.catalog.get(asgn)
-            .ok_or(FailInfo::InvalidAsgn(asgn.to_owned()).into_log())?
-            .as_ref().map_err(|err| err.clone() )?;
+        let spec = context.catalog_get(asgn_name)?;
 
         Self::verify_active(spec,context)?;
 
@@ -185,9 +182,9 @@ impl StudentAct
 
     fn read_score<T: FromStr>(asgn : &AsgnSpec, student_name : &str, score_name: &str) -> Result<T,FailLog>
     {
-        let path  = asgn.path.join(".info").join("ranking").join(student_name).join(score_name);
-        let text  = fs::read_to_string(path)
-                .map_err(|err|FailInfo::IOFail(format!("{}",err)).into_log())?;
+        let path = asgn.path.join(".info").join("ranking").join(student_name).join(score_name);
+        let text = fs::read_to_string(path)
+            .map_err(|err|FailInfo::IOFail(format!("{}",err)).into_log())?;
         T::from_str(&text)
             .map_err(|_|FailInfo::IOFail(
                 format!("Failed to parse score {} for student {}",score_name,student_name)
@@ -259,10 +256,7 @@ impl StudentAct
     }
 
     fn rank(asgn_name: &str, rule_name: &str, up: bool, context: &Context) -> Result<(),FailLog> {
-
-        let spec : &AsgnSpec = context.catalog.get(asgn_name)
-            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log())?
-            .as_ref().map_err(|err| err.clone())?;
+        let spec = context.catalog_get(asgn_name)?;
 
         let Some(ruleset) = spec.score.as_ref() else {
             return Err(FailInfo::Custom(
@@ -296,9 +290,7 @@ impl StudentAct
 
 
     fn submit(asgn_name: &str, context: &Context) -> Result<(), FailLog> {
-        let spec: &AsgnSpec = context.catalog.get(asgn_name)
-            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log())?
-            .as_ref().map_err(|err| err.clone())?;
+        let spec = context.catalog_get(asgn_name)?;
 
         Self::verify_active(spec,context)?;
 
@@ -354,9 +346,7 @@ impl StudentAct
 
     fn setup(asgn_name: &str, context: &Context) -> Result<(), FailLog>
     {
-        let spec : &AsgnSpec = context.catalog.get(asgn_name)
-            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log())?
-            .as_ref().map_err(|err| err.clone() )?;
+        let spec = context.catalog_get(asgn_name)?;
 
         Self::verify_active(spec,context)?;
 
@@ -375,10 +365,7 @@ impl StudentAct
 
     fn recover(asgn_name: &str, context: &Context) -> Result<(),FailLog>
     {
-
-        let spec : &AsgnSpec = context.catalog.get(asgn_name)
-            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log())?
-            .as_ref().map_err(|err| err.clone())?;
+        let spec = context.catalog_get(asgn_name)?;
 
         Self::verify_active(spec,context)?;
 
@@ -426,9 +413,7 @@ impl StudentAct
     }
 
     fn details(asgn_name: &str, context: &Context) -> Result<(),FailLog> {
-        let spec: &AsgnSpec = context.catalog.get(asgn_name)
-            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log())?
-            .as_ref().map_err(|err| err.clone() )?;
+        let spec = context.catalog_get(asgn_name)?;
 
         if ! spec.visible {
             return Err(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log());
