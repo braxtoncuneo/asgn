@@ -2,7 +2,6 @@
 use std::{
     collections::HashMap,
     env::current_dir,
-    ffi::{OsString, OsStr},
     fs,
     os::unix::fs::{PermissionsExt, MetadataExt},
     path::{Path, PathBuf}, iter
@@ -32,6 +31,18 @@ pub struct CourseToml {
     grace_limit: Option<i64>,
 }
 
+impl From<&Context> for CourseToml {
+    fn from(ctx: &Context) -> Self {
+        Self {
+            manifest: ctx.manifest.clone(),
+            graders:  ctx.graders.clone(),
+            students: ctx.students.clone(),
+            grace_total: ctx.grace_total,
+            grace_limit: ctx.grace_limit,
+        }
+    }
+}
+
 #[derive(PartialEq)]
 pub enum Role {
     Instructor,
@@ -42,21 +53,21 @@ pub enum Role {
 
 pub struct Context {
     // Determined through input
-    pub instructor: OsString,
+    pub instructor: String,
     pub base_path: PathBuf,
     pub exe_path: PathBuf,
 
     // Determined through system calls
     pub uid: u32,
-    pub user: OsString,
+    pub user: String,
     pub time: DateTime<Local>,
     pub cwd: PathBuf,
 
     // Determined by reading the context file
-    pub manifest: Vec<OsString>,
-    pub graders: Vec<OsString>,
-    pub students: Vec<OsString>,
-    pub members: Vec<OsString>,
+    pub manifest: Vec<String>,
+    pub graders: Vec<String>,
+    pub students: Vec<String>,
+    pub members: Vec<String>,
     pub grace_total: Option<i64>,
     pub grace_limit: Option<i64>,
 
@@ -65,7 +76,7 @@ pub struct Context {
 
     // Determined by trying to parse the spec of every
     // assignment in the manifest
-    pub catalog: HashMap<OsString, Result<AsgnSpec, FailLog>>,
+    pub catalog: HashMap<String, Result<AsgnSpec, FailLog>>,
 }
 
 impl Context {
@@ -73,38 +84,25 @@ impl Context {
         let course_file_path = base_path.join(".info").join("course.toml");
 
         let course_file_text = fs::read_to_string(course_file_path).map_err(|err|
-            FailInfo::NoSpec("course".to_string(), err.to_string()).into_log()
+            FailInfo::NoSpec("course".into(), err.to_string()).into_log()
         )?;
 
-        toml::from_str(&course_file_text)
-            .map_err(|err|
-                FailInfo::BadSpec("course".to_string(), err.to_string()
-                ).into_log()
-            )
+        toml::from_str(&course_file_text).map_err(|err|
+            FailInfo::BadSpec("course".into(), err.to_string()).into_log()
+        )
     }
 
     pub fn sync(&self) -> Result<(), FailLog> {
         use FailInfo::*;
         let course_file_path = self.base_path.join(".info").join("course.toml");
 
-        let course_toml = CourseToml {
-            manifest: self.manifest.iter().cloned().map(|o| o.into_string().unwrap()).collect(),
-            graders:  self.graders .iter().cloned().map(|o| o.into_string().unwrap()).collect(),
-            students: self.students.iter().cloned().map(|o| o.into_string().unwrap()).collect(),
-            grace_total : self.grace_total,
-            grace_limit : self.grace_limit,
-        };
+        let course_toml = CourseToml::from(self);
 
-        let toml_text = toml::to_string(&course_toml)
-            .map_err(|err| IOFail(format!(
-                "Could not serialize course spec : {}",
-                err
-            )).into_log())?;
+        let toml_text = toml::to_string(&course_toml).map_err(|err|
+            IOFail(format!("Could not serialize course spec: {}", err)).into_log()
+        )?;
 
-        util::write_file(
-            course_file_path,
-            toml_text
-        )
+        util::write_file(course_file_path, toml_text)
     }
 
     pub fn populate_catalog(&mut self) {
@@ -121,7 +119,8 @@ impl Context {
         let uid = get_current_uid();
         let user = get_user_by_uid(uid)
             .ok_or(FailInfo::InvalidUID())?
-            .name().to_owned();
+            .name().to_str().unwrap()
+            .to_owned();
 
         let cwd = current_dir().map_err(|_| FailInfo::InvalidCWD())?;
 
@@ -135,28 +134,28 @@ impl Context {
         let instructor_uid = std::fs::metadata(&base_path)
             .map_err(|err| FailInfo::IOFail(err.to_string()))?
             .uid();
-        let instructor : OsString = get_user_by_uid(instructor_uid)
+        let instructor: String = get_user_by_uid(instructor_uid)
                 .ok_or(FailInfo::InvalidUID())?
-                .name().into();
+                .name().to_str().unwrap().to_owned();
 
         let time = Local::now();
 
         let spec = Self::load(&base_path)?;
-        let manifest: Vec<_> = spec.manifest.into_iter().map(OsString::from).collect();
-        let graders:  Vec<_> = spec.graders .into_iter().map(OsString::from).collect();
-        let students: Vec<_> = spec.students.into_iter().map(OsString::from).collect();
+        let manifest: Vec<_> = spec.manifest.clone();
+        let graders:  Vec<_> = spec.graders .clone();
+        let students: Vec<_> = spec.students.clone();
         let grace_total = spec.grace_total;
         let grace_limit = spec.grace_limit;
 
         let role =
-            if students.contains(&user) { Role::Student }
-            else if graders.contains(&user) { Role::Grader }
+            if spec.students.contains(&user) { Role::Student }
+            else if spec.graders.contains(&user) { Role::Grader }
             else if user == instructor { Role::Instructor }
             else { Role::Other };
 
         let members = iter::once(instructor.clone())
-            .chain(graders.iter().cloned())
-            .chain(students.iter().cloned())
+            .chain(spec.graders.iter().cloned())
+            .chain(spec.students.iter().cloned())
             .collect();
 
         let mut context = Self {
@@ -167,9 +166,9 @@ impl Context {
             user,
             time,
             cwd,
-            manifest,
-            graders,
-            students,
+            manifest: spec.manifest,
+            graders: spec.graders,
+            students: spec.students,
             members,
             grace_total,
             grace_limit,
@@ -184,7 +183,7 @@ impl Context {
 
     pub fn print_manifest(&self) {
         for name in self.manifest.iter() {
-            println!("{}", name.to_str().unwrap());
+            println!("{name}");
         }
     }
 
@@ -196,15 +195,15 @@ impl Context {
             .collect::<FailLog>()
     }
 
-    pub fn get_spec<'a>(manifest: &'a Vec<AsgnSpec>, name: &OsStr) -> Option<&'a AsgnSpec> {
+    pub fn get_spec<'a>(manifest: &'a Vec<AsgnSpec>, name: &str) -> Option<&'a AsgnSpec> {
         manifest.iter().find(|entry|
-            name == OsStr::new(&entry.name)
+            name == &entry.name
         )
     }
 
     pub fn announce(&self) {
         println!("The time is: {}", self.time);
-        println!("The user is: {}", self.user.to_str().unwrap());
+        println!("The user is: {}", self.user);
         println!("Called from directory {}", self.cwd.display());
     }
 
@@ -218,7 +217,7 @@ impl Context {
         Ok(())
     }
 
-    pub fn grader_facl(&self, student: Option<&OsStr>) -> Result<Vec<util::FaclEntry>, FailLog> {
+    pub fn grader_facl(&self, student: Option<&str>) -> Result<Vec<util::FaclEntry>, FailLog> {
         let mut facl_list: Vec<util::FaclEntry> = Vec::new();
 
         facl_list.push(util::FaclEntry {
@@ -238,8 +237,7 @@ impl Context {
         }
 
         let graders_exclusive = self.graders.iter()
-            .map(OsString::as_os_str)
-            .filter(|&grader| Some(grader) != student && grader != &self.instructor)
+            .filter(|&grader| Some(grader.as_str()) != student && grader != &self.instructor)
             .map(|grader| util::FaclEntry {
                 user: grader.to_owned(),
                 read: true,
@@ -276,7 +274,7 @@ impl Context {
     }
 
 
-    pub fn refresh_assignment(&self, asgn: &OsStr) -> Result<(), FailLog> {
+    pub fn refresh_assignment(&self, asgn: &str) -> Result<(), FailLog> {
         let asgn_path = self.base_path.join(asgn);
         util::refresh_dir(&asgn_path, 0o755, iter::empty())?;
 
@@ -284,7 +282,7 @@ impl Context {
         util::refresh_dir(&asgn_spec_path, 0o755, iter::empty())?;
 
         let asgn_info_path = asgn_spec_path.join("info.toml");
-        let asgn_text = toml::to_string(&AsgnSpecToml::default_with_name(asgn)).unwrap();
+        let asgn_text = toml::to_string(&AsgnSpecToml::default_with_name(asgn.to_owned())).unwrap();
         util::refresh_file(&asgn_info_path, 0o644, asgn_text)?;
 
         let asgn_make_path = asgn_spec_path.join("Makefile");
@@ -335,7 +333,7 @@ impl Context {
     }
 
 
-    pub fn get_slot<'a>(&'a self, asgn: &'a AsgnSpec, user: &OsStr) -> SubmissionSlot<'a> {
+    pub fn get_slot<'a>(&'a self, asgn: &'a AsgnSpec, user: &str) -> SubmissionSlot<'a> {
         SubmissionSlot {
             context: &self,
             asgn_spec: asgn,
@@ -396,7 +394,7 @@ impl Context {
         ]
     }
 
-    pub fn submission_summary_row(&self, asgn: &AsgnSpec, user: &OsStr) -> Vec<String> {
+    pub fn submission_summary_row(&self, asgn: &AsgnSpec, user: &str) -> Vec<String> {
         let status = self.get_slot(asgn, user).status().unwrap();
         let lateness = status.versus(asgn.due_date.as_ref());
 
@@ -405,14 +403,14 @@ impl Context {
 
         vec![
             asgn.name.clone(),
-            user.to_str().unwrap().to_owned(),
-            lateness.to_string(),
+            user.to_owned(),
+            lateness,
             extension.to_string(),
-            grace.to_string()
+            grace.to_string(),
         ]
     }
 
-    pub fn normal_summary_row(&self, asgn: &AsgnSpec, user: &OsStr) -> Result<Vec<String>, FailLog> {
+    pub fn normal_summary_row(&self, asgn: &AsgnSpec, user: &str) -> Result<Vec<String>, FailLog> {
         let sub_dir = self.base_path.join(&asgn.name).join(user);
 
         let slot = SubmissionSlot {
@@ -458,31 +456,31 @@ impl Context {
     }
 
 
-    pub fn list_subs(&self, asgn: Option<&OsStr>, user: Option<&OsStr>) -> Result<(), FailLog> {
+    pub fn list_subs(&self, asgn: Option<&str>, user: Option<&str>) -> Result<(), FailLog> {
         let header: Vec<String> = ["ASSIGNMENT","USER", "SUBMISSION STATUS", "EXTENSION", "GRACE"]
             .iter().map(|s| s.to_string()).collect();
 
         let mut table = Table::new(header.len());
         table.add_row(header)?;
 
-        let asgn_list: Vec<&OsStr> = match asgn {
+        let asgn_list: Vec<_> = match asgn {
             Some(asgn_name) => {
                 if !self.manifest.iter().any(|asgn| asgn == asgn_name) {
                     return Err(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log())
                 }
                 vec![asgn_name]
             }
-            None => self.manifest.iter().map(OsString::as_os_str).collect(),
+            None => self.manifest.iter().map(String::as_str).collect(),
         };
 
-        let user_list: Vec<&OsStr> = match user {
+        let user_list: Vec<_> = match user {
             Some(user_name) => {
                 if !self.members.iter().any(|member| member == user_name) {
                     return Err(FailInfo::InvalidUser(user_name.to_owned()).into_log())
                 }
                 vec![user_name]
             }
-            None => self.members.iter().map(OsString::as_os_str).collect(),
+            None => self.members.iter().map(String::as_str).collect(),
         };
 
         let body: Vec<Vec<String>> = asgn_list.iter()
@@ -599,6 +597,6 @@ pub fn init(base_path: impl AsRef<Path>) -> Result<(), FailLog> {
     let toml_path = info_path.join("course.toml");
     util::refresh_file(&toml_path,0o755,toml::to_string(&CourseToml::default()).unwrap())?;
 
-    let mut context = Context::deduce(OsString::from(base_path))?;
+    let mut context = Context::deduce(&base_path)?;
     InstructorAct::Refresh{}.execute(&mut context)
 }

@@ -2,11 +2,8 @@ use dirs;
 use itertools::Itertools;
 
 use std::{
-    ffi::OsString,
     fs,
     io::Write,
-    os::unix::
-    ffi::OsStringExt,
     path::{Path, PathBuf},
     process::{Command, ExitStatus, Stdio}, fmt::{self, Write as _},
 };
@@ -33,9 +30,7 @@ pub fn print_bold_hline () {
     }
 }
 
-pub fn run_at(mut cmd: Command, path: impl AsRef<Path>, pipe_stdout: bool)
--> Result<(ExitStatus, OsString, OsString), FailLog>
-{
+pub fn run_at(mut cmd: Command, path: impl AsRef<Path>, pipe_stdout: bool) -> Result<ExitStatus, FailLog> {
     let cmd = cmd.current_dir(path.as_ref());
 
     let output = if pipe_stdout {
@@ -51,25 +46,25 @@ pub fn run_at(mut cmd: Command, path: impl AsRef<Path>, pipe_stdout: bool)
             .map_err(|err| FailInfo::IOFail(format!("running command {cmd:?}: {err}")).into_log())?
     };
 
-    let stderr = OsString::from_vec(output.stderr);
-    let stdout = OsString::from_vec(output.stdout);
     let status = output.status;
 
-    Ok((status,stdout,stderr))
+    Ok(status)
 }
 
 pub fn set_mode(path: impl AsRef<Path>, mode: u32) -> Result<(), FailLog> {
+    let path = path.as_ref();
+
     let mut cmd = std::process::Command::new("chmod");
     cmd.arg(format!("{mode:o}"));
-    cmd.arg(path.as_ref());
+    cmd.arg(path);
 
     let output = cmd.output().map_err(|err|
-        FailInfo::IOFail(format!("chmoding {} : {}",path.as_ref().display(),err)).into_log()
+        FailInfo::IOFail(format!("chmoding {}: {}", path.display(), err)).into_log()
     )?;
 
-    let stderr = OsString::from_vec(output.stderr);
     if !output.status.success() {
-        return Err(FailInfo::IOFail(stderr.to_string_lossy().to_string()).into())
+        let err_msg = String::from_utf8_lossy(&output.stderr).into_owned();
+        return Err(FailInfo::IOFail(err_msg).into())
     }
 
     Ok(())
@@ -77,7 +72,7 @@ pub fn set_mode(path: impl AsRef<Path>, mode: u32) -> Result<(), FailLog> {
 
 #[derive(Clone)]
 pub struct FaclEntry {
-    pub user: OsString,
+    pub user: String,
     pub read: bool,
     pub write: bool,
     pub exe: bool,
@@ -85,7 +80,7 @@ pub struct FaclEntry {
 
 impl fmt::Display for FaclEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:", self.user.to_str().unwrap())?;
+        write!(f, "{}:", self.user)?;
         if self.read  { f.write_char('r')?; }
         if self.write { f.write_char('w')?; }
         if self.exe   { f.write_char('x')?; }
@@ -115,9 +110,9 @@ pub fn set_facl<'facl>(
         FailInfo::IOFail(format!("fusing setfacl: {err}")).into_log()
     )?;
 
-    let stderr = OsString::from_vec(output.stderr);
     if !output.status.success() {
-        return Err(FailInfo::IOFail(stderr.to_string_lossy().to_string()).into())
+        let err_msg = String::from_utf8_lossy(&output.stderr).into_owned();
+        return Err(FailInfo::IOFail(err_msg).into())
     }
 
     Ok(())
@@ -142,7 +137,7 @@ pub fn refresh_file(path: impl AsRef<Path>, mode: u32, default_text: String) -> 
         )?;
     }
 
-    set_mode(path,mode)?;
+    set_mode(path, mode)?;
 
     Ok(())
 }
@@ -171,7 +166,7 @@ pub fn refresh_dir<'facl>(
         )?;
     }
 
-    set_mode(path,mode)?;
+    set_mode(path, mode)?;
 
     set_facl(path,false,facl.clone())?;
     set_facl(path,true, facl)?;
@@ -229,19 +224,19 @@ pub fn bashrc_append_line(line: &str) -> Result<(), FailLog> {
     Ok(())
 }
 
-pub fn make_fresh_dir(path : &Path, base_name : &str) -> PathBuf {
-    let mut idx : Option<usize> = None;
+pub fn make_fresh_dir(path: &Path, base_name: &str) -> PathBuf {
+    let mut idx: Option<usize> = None;
 
     let gen_path = |idx: Option<usize>| {
-        if let Some(idx) =idx {
-            path.join(format!("{}.{}",base_name,idx))
+        if let Some(idx) = idx {
+            path.join(format!("{}.{}", base_name, idx))
         } else {
             path.join(base_name)
         }
     };
 
     while gen_path(idx).exists() {
-        idx = idx.map(|i|i+1).or(Some(0));
+        idx = idx.map(|i| i+1).or(Some(0));
     }
 
     gen_path(idx)

@@ -1,27 +1,18 @@
 use structopt::StructOpt;
 use super::student::StudentAct;
 
-use std::
-{
-    ffi::OsString,
-    path::Path,
-};
+use std::path::{Path, PathBuf};
 
-use crate::
-{
+use crate::{
     asgn_spec::AsgnSpec,
     context::Context,
-    fail_info::
-    {
-        FailInfo,
-        FailLog,
-    },
+    fail_info::{FailInfo, FailLog},
     util,
 };
 
 use colored::Colorize;
 
-#[derive(Debug,StructOpt)]
+#[derive(Debug, StructOpt)]
 #[structopt(
     name       = "asgn - grader version",
     author     = "Braxton Cuneo",
@@ -29,77 +20,62 @@ use colored::Colorize;
     version    = "0.0.1",
     rename_all = "snake",
 )]
-pub struct GraderCmd
-{
 
+pub struct GraderCmd {
     #[structopt(name = "base path")]
-    base_path : OsString,
+    base_path: PathBuf,
 
     #[structopt(subcommand)]
     pub act: GraderAct,
 }
 
 
-#[derive(Debug,StructOpt)]
+#[derive(Debug, StructOpt)]
 #[structopt(rename_all = "snake")]
-pub enum GraderAct
-{
+pub enum GraderAct {
     #[structopt(flatten)]
     Student(StudentAct),
 
     // Instructors and Graders
-    #[structopt(about = "[graders only] runs build rules for a specific assignment, using the current working directory as the location of the submission")]
-    Build
-    {
+    #[structopt(about = "[graders only] runs build rules for an assignment, using cwd as the submission location")]
+    Build {
         #[structopt(name = "assignment name")]
-        asgn_name: OsString,
+        asgn_name: String,
     },
-    #[structopt(about = "[graders only] run grade rules for a specific assignment, using the current working directory as the location of the submission")]
-    Grade
-    {
+    #[structopt(about = "[graders only] run grade rules for an assignment, using cwd as the submission location")]
+    Grade {
         #[structopt(name = "assignment name")]
-        asgn_name: OsString,
+        asgn_name: String,
     },
-    #[structopt(about = "[graders only] runs check rules for a specific assignment, using the current working directory as the location of the submission")]
-    Check
-    {
+    #[structopt(about = "[graders only] runs check rules for an assignment, using cwd as the submission location")]
+    Check {
         #[structopt(name = "assignment name")]
-        asgn_name: OsString,
+        asgn_name: String,
     },
-    #[structopt(about = "[graders only] runs score rules for a specific assignment, using the current working directory as the location of the submission")]
-    Score
-    {
+    #[structopt(about = "[graders only] runs score rules for an assignment, using cwd as the submission location")]
+    Score {
         #[structopt(name = "assignment name")]
-        asgn_name: OsString,
+        asgn_name: String,
     },
-    #[structopt(about = "[graders only] copies the directory of a specific submission to the current working directory")]
-    Copy
-    {
+    #[structopt(about = "[graders only] copies the directory of a submission to cwd")]
+    Copy {
         #[structopt(name = "assignment name")]
-        asgn_name: OsString,
+        asgn_name: String,
         #[structopt(name = "student name")]
-        stud_name: OsString,
+        stud_name: String,
     },
-    #[structopt(about = "[graders only] copies the directory of all submissions of a specific assignment to the current working directory")]
-    CopyAll
-    {
+    #[structopt(about = "[graders only] copies the directory of all submissions of an assignment to cwd")]
+    CopyAll {
         #[structopt(name = "assignment name")]
-        asgn_name: OsString,
+        asgn_name: String,
     },
 }
 
-
-
-impl GraderAct
-{
-
-
-
-    fn build(asgn_name: &OsString, context: &Context) -> Result<(),FailLog>
-    {
-        let spec : &AsgnSpec = context.catalog.get(asgn_name)
-            .ok_or(FailInfo::InvalidAsgn(asgn_name.clone()).into_log())?
-            .as_ref().map_err(|err| err.clone() )?;
+impl GraderAct {
+    fn build(asgn_name: &str, context: &Context) -> Result<(), FailLog> {
+        let spec: &AsgnSpec = context.catalog.get(asgn_name)
+            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log())?
+            .as_ref().map_err(Clone::clone)?;
 
         let cwd = context.cwd.clone();
         let _ = spec.run_ruleset(context,spec.build.as_ref(),&cwd,false).is_err();
@@ -107,11 +83,10 @@ impl GraderAct
         Ok(())
     }
 
-    fn grade(asgn_name: &OsString, context: &Context) -> Result<(),FailLog>
-    {
-        let spec : &AsgnSpec = context.catalog.get(asgn_name)
-            .ok_or(FailInfo::InvalidAsgn(asgn_name.clone()).into_log())?
-            .as_ref().map_err(|err| err.clone() )?;
+    fn grade(asgn_name: &str, context: &Context) -> Result<(), FailLog> {
+        let spec: &AsgnSpec = context.catalog.get(asgn_name)
+            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log())?
+            .as_ref().map_err(|err| err.clone())?;
         let cwd = context.cwd.clone();
 
         let check_result  = spec.run_on_grade(context,spec.check.as_ref(),&cwd,"Evaluating Checks",true);
@@ -135,11 +110,10 @@ impl GraderAct
         Ok(())
     }
 
-    fn check(asgn_name: &OsString, context: &Context) -> Result<(),FailLog>
-    {
+    fn check(asgn_name: &str, context: &Context) -> Result<(),FailLog> {
         let spec : &AsgnSpec = context.catalog.get(asgn_name)
-            .ok_or(FailInfo::InvalidAsgn(asgn_name.clone()).into_log())?
-            .as_ref().map_err(|err| err.clone() )?;
+            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log())?
+            .as_ref().map_err(|err| err.clone())?;
 
         util::print_bold_hline();
         println!("{}","Evaluating Checks".yellow().bold());
@@ -150,10 +124,10 @@ impl GraderAct
         Ok(())
     }
 
-    fn score(asgn_name: &OsString, context: &Context) -> Result<(),FailLog>
+    fn score(asgn_name: &str, context: &Context) -> Result<(),FailLog>
     {
         let spec : &AsgnSpec = context.catalog.get(asgn_name)
-            .ok_or(FailInfo::InvalidAsgn(asgn_name.clone()).into_log())?
+            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log())?
             .as_ref().map_err(|err| err.clone() )?;
 
         util::print_bold_hline();
@@ -166,19 +140,16 @@ impl GraderAct
     }
 
 
-    pub fn copy(asgn_name: &OsString, user_name: &OsString, dst_dir : Option<&Path>, context: &Context)
-    -> Result<(),FailLog>
-    {
-
-        let spec : &AsgnSpec = context.catalog.get(asgn_name)
-            .ok_or(FailInfo::InvalidAsgn(asgn_name.clone()).into_log())
+    pub fn copy(asgn_name: &str, user_name: &str, dst_dir: Option<&Path>, context: &Context) -> Result<(),FailLog> {
+        let spec: &AsgnSpec = context.catalog.get(asgn_name)
+            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log())
             ?.as_ref().map_err(|err| err.clone() )?;
 
         let dst_dir = dst_dir.unwrap_or(&context.cwd);
 
-        let dst_dir = util::make_fresh_dir(dst_dir,&user_name.to_string_lossy());
+        let dst_dir = util::make_fresh_dir(dst_dir,user_name);
 
-        spec.retrieve_sub(&dst_dir,&user_name.to_string_lossy())?;
+        spec.retrieve_sub(&dst_dir,user_name)?;
 
         let build_result = spec.run_on_submit(context,spec.build.as_ref(),&dst_dir,"Building",false);
         if build_result.map(|opt|opt.is_err()).unwrap_or(false) {
@@ -200,14 +171,14 @@ impl GraderAct
         Ok(())
     }
 
-    pub fn copy_all(asgn_name: &OsString, dst_dir : Option<&Path>, context: &Context) -> Result<(),FailLog>
+    pub fn copy_all(asgn_name: &str, dst_dir: Option<&Path>, context: &Context) -> Result<(),FailLog>
     {
         let dst_dir = dst_dir.map(|p|p.to_path_buf()).unwrap_or(
-            util::make_fresh_dir(&context.cwd,&asgn_name.to_string_lossy())
+            util::make_fresh_dir(&context.cwd, asgn_name)
         );
         util::refresh_dir(&dst_dir,0o700,Vec::new().iter())?;
         for member_name in context.members.iter() {
-            println!("{}",format!("Retrieving Submission for '{}'",member_name.to_string_lossy()).bold());
+            println!("{}",format!("Retrieving Submission for '{member_name}'").bold());
             if let Err(err) = Self::copy(asgn_name,member_name,Some(&dst_dir),context){
                 util::print_bold_hline();
                 print!("{}",err);
@@ -232,5 +203,3 @@ impl GraderAct
     }
 
 }
-
-

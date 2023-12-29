@@ -1,6 +1,7 @@
 
+use std::path::PathBuf;
+
 use structopt::StructOpt;
-use std::ffi::OsString;
 
 use crate::{context::Context, fail_info::FailLog, util::bashrc_append_line};
 
@@ -15,7 +16,7 @@ use crate::{context::Context, fail_info::FailLog, util::bashrc_append_line};
 
 pub struct OtherCmd {
     #[structopt(name = "base path")]
-    base_path : OsString,
+    base_path: PathBuf,
 
     #[structopt(subcommand)]
     pub act: OtherAct,

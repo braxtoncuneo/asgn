@@ -5,9 +5,8 @@ use util::bashrc_append_line;
 
 use std::
 {
-    ffi::OsString,
     fs,
-    path::Path,
+    path::{Path, PathBuf},
     str::FromStr,
 };
 
@@ -46,7 +45,7 @@ pub struct StudentCmd
 {
 
     #[structopt(name = "base path")]
-    base_path : OsString,
+    base_path: PathBuf,
 
     #[structopt(subcommand)]
     pub act: StudentAct,
@@ -54,58 +53,57 @@ pub struct StudentCmd
 
 
 
-#[derive(Debug,StructOpt)]
+#[derive(Debug, StructOpt)]
 #[structopt(rename_all = "snake")]
-pub enum StudentAct
-{
+pub enum StudentAct {
     #[structopt(flatten)]
     Other(OtherAct),
     // Everyone
     #[structopt(about = "submits assignments (or tells you why they cannot be submitted)")]
     Submit {
         #[structopt(name = "assignment name")]
-        asgn_name: OsString,
+        asgn_name: String,
     },
     #[structopt(about = "copies setup code for assignments (if provided by the instructor)")]
     Setup {
         #[structopt(name = "assignment name")]
-        asgn_name: OsString,
+        asgn_name: String,
     },
     #[structopt(about = "recovers the last submitted version of the input assignment (or tells you why they cannot be recovered)")]
     Recover {
         #[structopt(name = "assignment name")]
-        asgn_name: OsString,
+        asgn_name: String,
     },
     #[structopt(about = "summarizes information about submissions and currently visible assignments")]
     Summary {},
     #[structopt(about = "gives details about a specific assignment")]
     Details {
         #[structopt(name = "assignment name")]
-        asgn_name: OsString,
+        asgn_name: String,
     },
     #[structopt(about = "\"installs\" an alias to your .bashrc")]
     Alias {
         #[structopt(name = "alias name")]
-        alias_name: OsString,
+        alias_name: String,
     },
     #[structopt(about = "assigns an integer number of grace days to an assignment")]
     Grace {
         #[structopt(name = "assignment name")]
-        asgn: OsString,
+        asgn: String,
         #[structopt(name = "grace amount")]
-        ext : i64,
+        ext: i64,
     },
     #[structopt(about = "lists the scores for an assignment, ordered by the given score in ascending order")]
     RankAscending {
         #[structopt(name = "assignment name")]
-        asgn: OsString,
+        asgn: String,
         #[structopt(name = "score name")]
         score: String,
     },
     #[structopt(about = "lists the scores for an assignment, ordered by the given score in descending order")]
     RankDescending {
         #[structopt(name = "assignment name")]
-        asgn: OsString,
+        asgn: String,
         #[structopt(name = "score name")]
         score: String,
     },
@@ -158,8 +156,7 @@ impl StudentAct
     }
 
 
-    pub fn grace(asgn: &OsString, user: &OsString, ext_days: i64, context : &Context) -> Result<(),FailLog> {
-
+    pub fn grace(asgn: &str, user: &str, ext_days: i64, context : &Context) -> Result<(),FailLog> {
         if context.grace_total.is_none() {
             return Err(FailInfo::NoGrace.into_log());
         } else if let Some(num) = context.grace_limit.as_ref() {
@@ -169,7 +166,7 @@ impl StudentAct
         }
 
         let spec : &AsgnSpec = context.catalog.get(asgn)
-            .ok_or(FailInfo::InvalidAsgn(asgn.clone()).into_log())?
+            .ok_or(FailInfo::InvalidAsgn(asgn.to_owned()).into_log())?
             .as_ref().map_err(|err| err.clone() )?;
 
         Self::verify_active(spec,context)?;
@@ -219,9 +216,9 @@ impl StudentAct
         let scores = util::parse_from::<StatBlockSet>(&base_path)?;
 
         for member in context.members.iter() {
-            let member_name = member.clone().into_string().unwrap();
+            let member_name = member.clone();
             let stat_block = scores.get_block(&member_name);
-            let mut row = vec![Some(member.clone().into_string().unwrap())];
+            let mut row = vec![Some(member.clone())];
             if let Some(stat_block) = stat_block {
                 let score : Option<T> = stat_block.scores.get(rule_name)
                     .map(|v|v.to_string().parse::<T>().unwrap());
@@ -261,17 +258,15 @@ impl StudentAct
         Ok(())
     }
 
-    fn rank(asgn_name: &OsString, rule_name: &str, up: bool, context: &Context)
-    -> Result<(),FailLog>
-    {
+    fn rank(asgn_name: &str, rule_name: &str, up: bool, context: &Context) -> Result<(),FailLog> {
 
         let spec : &AsgnSpec = context.catalog.get(asgn_name)
-            .ok_or(FailInfo::InvalidAsgn(asgn_name.clone()).into_log())?
-            .as_ref().map_err(|err| err.clone() )?;
+            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log())?
+            .as_ref().map_err(|err| err.clone())?;
 
         let Some(ruleset) = spec.score.as_ref() else {
             return Err(FailInfo::Custom(
-                format!("Assignment '{}' has no scores to rank.",asgn_name.to_string_lossy()),
+                format!("Assignment '{}' has no scores to rank.", asgn_name),
                 format!("If you believe this assignment should have scores, contact the instructor.")
             ).into_log());
         };
@@ -281,7 +276,7 @@ impl StudentAct
             .next()
             .map(|r| r.kind.clone())
             .ok_or(FailInfo::Custom(
-                format!("Assignment '{}' does not have a '{}' score.",asgn_name.to_string_lossy(),rule_name),
+                format!("Assignment '{asgn_name}' does not have a '{rule_name}' score."),
                 format!("If you believe this assignment should have this score, contact the instructor.")
             ).into_log())?;
 
@@ -300,44 +295,43 @@ impl StudentAct
     }
 
 
-    fn submit(asgn_name: &OsString, context: &Context) -> Result<(),FailLog>
-    {
-        let spec : &AsgnSpec = context.catalog.get(asgn_name)
-            .ok_or(FailInfo::InvalidAsgn(asgn_name.clone()).into_log())?
-            .as_ref().map_err(|err| err.clone() )?;
+    fn submit(asgn_name: &str, context: &Context) -> Result<(), FailLog> {
+        let spec: &AsgnSpec = context.catalog.get(asgn_name)
+            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log())?
+            .as_ref().map_err(|err| err.clone())?;
 
         Self::verify_active(spec,context)?;
 
         let sub_dir = context.base_path.join(asgn_name).join(&context.user);
 
         let src_dir = context.cwd.clone();
-        let mut log : FailLog = Default::default();
+        let mut log: FailLog = Default::default();
         for file_name in spec.file_list.iter() {
             let src_path = src_dir.join(file_name);
             let dst_path = sub_dir.join(file_name);
+
             if ! src_path.exists() {
-                log.push(FailInfo::MissingFile(OsString::from(file_name)).into());
+                log.push(FailInfo::MissingFile(file_name.clone()).into());
                 continue;
             }
             if src_path.is_dir() {
-                log.push(FailInfo::FileIsDir(OsString::from(file_name)).into());
+                log.push(FailInfo::FileIsDir(file_name.clone()).into());
                 continue;
             }
             if ! src_path.is_file() {
-                log.push(FailInfo::FileIsOther(OsString::from(file_name)).into());
+                log.push(FailInfo::FileIsOther(file_name.clone()).into());
                 continue;
             }
-            fs::copy(&src_path,&dst_path)
-                .map_err(|err| {
-                    FailInfo::IOFail(format!("could not copy file {} to {} : {}",
-                    (&src_path).display(),(&dst_path).display(),err)).into_log()
-                })?;
-            util::set_mode(&dst_path,0o777)?;
+            fs::copy(&src_path,&dst_path).map_err(|err| {
+                FailInfo::IOFail(format!("could not copy file {} to {} : {}",
+                (&src_path).display(),(&dst_path).display(),err)).into_log()
+            })?;
+            util::set_mode(&dst_path, 0o777)?;
         }
         log.into_result()?;
 
         util::print_bold_hline();
-        println!("{}",format!("Assignment '{}' submitted!",asgn_name.to_string_lossy()).green());
+        println!("{}",format!("Assignment '{asgn_name}' submitted!").green());
 
         let build_result = spec.run_on_submit(context,spec.build.as_ref(),&sub_dir,"Building",false);
         if build_result.map(|opt|opt.is_err()).unwrap_or(false) {
@@ -358,10 +352,10 @@ impl StudentAct
         Ok(())
     }
 
-    fn setup(asgn_name: &OsString, context: &Context) -> Result<(),FailLog>
+    fn setup(asgn_name: &str, context: &Context) -> Result<(), FailLog>
     {
         let spec : &AsgnSpec = context.catalog.get(asgn_name)
-            .ok_or(FailInfo::InvalidAsgn(asgn_name.clone()).into_log())?
+            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log())?
             .as_ref().map_err(|err| err.clone() )?;
 
         Self::verify_active(spec,context)?;
@@ -370,38 +364,38 @@ impl StudentAct
             .join(asgn_name).join(".info").join("setup");
 
         if ! setup_dir.exists() {
-            return Err(FailInfo::NoSetup(asgn_name.clone()).into());
+            return Err(FailInfo::NoSetup(asgn_name.to_owned()).into());
         }
 
-        let setup_name = format!("{}_setup",asgn_name.to_string_lossy());
+        let setup_name = format!("{asgn_name}_setup");
         let dst_dir = util::make_fresh_dir(&context.cwd,&setup_name);
 
         StudentAct::copy_dir(dst_dir,setup_dir)
     }
 
-    fn recover(asgn_name: &OsString, context: &Context) -> Result<(),FailLog>
+    fn recover(asgn_name: &str, context: &Context) -> Result<(),FailLog>
     {
 
         let spec : &AsgnSpec = context.catalog.get(asgn_name)
-            .ok_or(FailInfo::InvalidAsgn(asgn_name.clone()).into_log())?
-            .as_ref().map_err(|err| err.clone() )?;
+            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log())?
+            .as_ref().map_err(|err| err.clone())?;
 
         Self::verify_active(spec,context)?;
 
         let sub_dir = context.base_path.join(asgn_name).join(&context.user);
 
-        let recovery_name = format!("{}_recovery",asgn_name.to_string_lossy());
+        let recovery_name = format!("{asgn_name}_recovery");
         let dst_dir = util::make_fresh_dir(&context.cwd,&recovery_name);
 
         fs::create_dir_all(&dst_dir)
             .map_err(|err| -> FailLog {FailInfo::IOFail(err.to_string()).into()})?;
 
-        let mut log : FailLog = Default::default();
-        for file_name in spec.file_list.iter() {
+        let mut log: FailLog = Default::default();
+        for file_name in &spec.file_list {
             let src_path = sub_dir.join(file_name);
             let dst_path = dst_dir.join(file_name);
             if ! src_path.exists() {
-                log.push(FailInfo::MissingSub(OsString::from(file_name)).into());
+                log.push(FailInfo::MissingSub(file_name.clone()).into());
                 continue;
             }
             fs::copy(&src_path,&dst_path)
@@ -415,13 +409,13 @@ impl StudentAct
     }
 
 
-    fn alias(alias_name: &OsString, context: &Context) -> Result<(),FailLog>
+    fn alias(alias_name: &str, context: &Context) -> Result<(),FailLog>
     {
         let line = format!(
             "alias {}=\"{} {}\"",
-            alias_name.to_string_lossy(),
-            context.exe_path.clone().into_os_string().into_string().unwrap(),
-            context.base_path.clone().into_os_string().into_string().unwrap()
+            alias_name,
+            context.exe_path.display(),
+            context.base_path.display(),
         );
         bashrc_append_line(&line)?;
         println!("{}","Alias installed successfully.".yellow());
@@ -431,13 +425,13 @@ impl StudentAct
         Ok(())
     }
 
-    fn details(asgn_name : &OsString, context: &Context) -> Result<(),FailLog> {
-        let spec : &AsgnSpec = context.catalog.get(asgn_name)
-            .ok_or(FailInfo::InvalidAsgn(asgn_name.clone()).into_log())?
+    fn details(asgn_name: &str, context: &Context) -> Result<(),FailLog> {
+        let spec: &AsgnSpec = context.catalog.get(asgn_name)
+            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log())?
             .as_ref().map_err(|err| err.clone() )?;
 
         if ! spec.visible {
-            return Err(FailInfo::InvalidAsgn(asgn_name.clone()).into_log());
+            return Err(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log());
         }
 
         print!("{}", spec.details(context)?);

@@ -1,5 +1,4 @@
 use std::{
-    ffi::{OsString, OsStr},
     fs,
     path::{PathBuf, Path},
     process::Stdio,
@@ -91,11 +90,12 @@ impl Default for AsgnSpecToml {
 }
 
 impl AsgnSpecToml {
-    pub fn default_with_name <S: AsRef<OsStr>> (name : S) -> Self {
-        let mut result : Self = Default::default();
-        result.name = name.as_ref().to_string_lossy().to_string();
-        result.file_list.push(format!("{}.cpp",&result.name));
-        result
+    pub fn default_with_name(name: String) -> Self {
+        Self {
+            file_list: vec![format!("{name}.cpp")],
+            name,
+            ..Self::default()
+        }
     }
 }
 
@@ -181,8 +181,8 @@ impl AsgnSpec {
 
         let info_text = fs::read_to_string(info_path).map_err(|err|
             FailInfo::NoSpec(
-                path.file_name().map(|os| os.to_str().unwrap().to_owned())
-                    .unwrap_or("assignment".to_string()),
+                path.file_name().map(|os| os.to_str().unwrap())
+                    .unwrap_or("assignment").to_owned(),
                 err.to_string()
             ).into_log()
         )?;
@@ -313,7 +313,7 @@ impl AsgnSpec {
         cmd.stdout(Stdio::inherit());
         cmd.stderr(Stdio::inherit());
 
-        let (status, _, _) = util::run_at(cmd,&path,false).map_err(drop)?;
+        let status = util::run_at(cmd,&path,false).map_err(drop)?;
 
         if status.success() {
             let pass_text = rule.pass_text.clone()
@@ -573,17 +573,20 @@ impl <'ctx> SubmissionSlot<'ctx> {
     pub fn get_extension(&self) -> Result<i64,FailLog> {
         let ext_path = self.extension_path();
 
-        if ! ext_path.exists() {
+        if !ext_path.exists() {
             return Ok(0);
         }
         if ext_path.is_dir() {
             return Ok(0);
         }
 
-        let owner_uid = std::fs::metadata(&ext_path)
+        let owner_uid = fs::metadata(&ext_path)
             .map_err(|err| FailInfo::IOFail(err.to_string()))?.uid();
-        let owner : OsString = get_user_by_uid(owner_uid)
-            .ok_or(FailInfo::InvalidUID() )?.name().into();
+
+        let owner = get_user_by_uid(owner_uid)
+            .ok_or(FailInfo::InvalidUID())?
+            .name().to_str().unwrap()
+            .to_owned();
 
         if owner != self.context.instructor {
             return Err(FailInfo::IOFail(format!(

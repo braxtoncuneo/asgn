@@ -1,7 +1,6 @@
 use std::{
-    ffi::OsString,
     str::FromStr,
-    path::Path, iter,
+    path::{Path, PathBuf},
 };
 
 
@@ -42,7 +41,7 @@ pub struct InstructorCmd
 {
 
     #[structopt(name = "base path")]
-    base_path : OsString,
+    base_path: PathBuf,
 
     #[structopt(subcommand)]
     pub act: InstructorAct,
@@ -62,37 +61,37 @@ pub enum InstructorAct
     AddStudents
     {
         #[structopt(name = "user names")]
-        user_names: Vec<OsString>,
+        user_names: Vec<String>,
     },
     #[structopt(about = "[instructors only] removes the listed students from the course's student list")]
     RemStudents
     {
         #[structopt(name = "user names")]
-        user_names: Vec<OsString>,
+        user_names: Vec<String>,
     },
     #[structopt(about = "[instructors only] adds the listed graders to the course's grader list")]
     AddGraders
     {
         #[structopt(name = "user names")]
-        user_names: Vec<OsString>,
+        user_names: Vec<String>,
     },
     #[structopt(about = "[instructors only] removes the listed graders from the course's grader list")]
     RemGraders
     {
         #[structopt(name = "user names")]
-        user_names: Vec<OsString>,
+        user_names: Vec<String>,
     },
     #[structopt(about = "[instructors only] adds the listed assignments to the course manifest, initialized to a blank assignment")]
     AddAsgns
     {
         #[structopt(name = "assignment names")]
-        asgn_names: Vec<OsString>,
+        asgn_names: Vec<String>,
     },
     #[structopt(about = "[instructors only] removes the listed assigments from the course manifest")]
     RemAsgns
     {
         #[structopt(name = "user names")]
-        asgn_names: Vec<OsString>,
+        asgn_names: Vec<String>,
     },
     #[structopt(about = "[instructors only] lists the course's assignments")]
     ListAsgns{},
@@ -100,71 +99,71 @@ pub enum InstructorAct
     ListSubs
     {
         #[structopt(name = "assignment name",long = "asgn")]
-        asgn:  Option<Option<OsString>>,
+        asgn:  Option<Option<String>>,
         #[structopt(name = "student user name",long = "user")]
-        user : Option<Option<OsString>>,
+        user: Option<Option<String>>,
     },
     #[structopt(about = "[instructors only] sets the due date of an assignment")]
     SetDue
     {
         #[structopt(name = "assignment name")]
-        asgn: OsString,
+        asgn: String,
         #[structopt(name = "yyyy-mm-dd")]
-        date: OsString,
+        date: String,
     },
     #[structopt(about = "[instructors only] sets the open date of an assignment")]
     SetOpen{
         #[structopt(name = "assignment name")]
-        asgn: OsString,
+        asgn: String,
         #[structopt(name = "yyyy-mm-dd")]
-        date: OsString,
+        date: String,
     },
     #[structopt(about = "[instructors only] sets the close date of an assignment")]
     SetClose{
         #[structopt(name = "assignment name")]
-        asgn: OsString,
+        asgn: String,
         #[structopt(name = "yyyy-mm-dd")]
-        date: OsString,
+        date: String,
     },
     #[structopt(about = "[instructors only] removes the due date of an assignment")]
     UnsetDue{
         #[structopt(name = "assignment name")]
-        asgn: OsString,
+        asgn: String,
     },
     #[structopt(about = "[instructors only] removes the open date of an assignment")]
     UnsetOpen{
         #[structopt(name = "assignment name")]
-        asgn: OsString,
+        asgn: String,
     },
     #[structopt(about = "[instructors only] removes the close date of an assignment")]
     UnsetClose{
         #[structopt(name = "assignment name")]
-        asgn: OsString,
+        asgn: String,
     },
     #[structopt(about = "[instructors only] enables assignment, allowing setup, submission, etc")]
     Enable{
         #[structopt(name = "assignment name")]
-        asgn: OsString,
+        asgn: String,
     },
     #[structopt(about = "[instructors only] disables assignment, disallowing setup, submission, etc")]
     Disable{
         #[structopt(name = "assignment name")]
-        asgn: OsString,
+        asgn: String,
     },
     #[structopt(about = "[instructors only] publishes the assignment, allowing students to see it in the course summary")]
     Publish{
         #[structopt(name = "assignment name")]
-        asgn: OsString,
+        asgn: String,
     },
     #[structopt(about = "[instructors only] unpublishes the assignment, disallowing students from seeing it in the course summary")]
     Unpublish{
         #[structopt(name = "assignment name")]
-        asgn: OsString,
+        asgn: String,
     },
     #[structopt(about = "[instructors only] updates published scores for a given assignment based upon current submissions")]
     UpdateScores{
         #[structopt(name = "assignment name")]
-        asgn: OsString,
+        asgn: String,
     },
     #[structopt(about = "[instructors only] updates published scores for all assignments based upon current submissions")]
     UpdateAllScores{},
@@ -173,7 +172,7 @@ pub enum InstructorAct
     Audit
     {
         #[structopt(name = "assignment name")]
-        asgn_name: OsString,
+        asgn_name: String,
     },
 
     #[structopt(about = "[instructors only] checks all assignment specifications for validity")]
@@ -183,9 +182,9 @@ pub enum InstructorAct
     Extend
     {
         #[structopt(name = "assignment name")]
-        asgn: OsString,
+        asgn: String,
         #[structopt(name = "user name")]
-        user: OsString,
+        user: String,
         #[structopt(name = "extension amount")]
         ext : i64,
     },
@@ -193,9 +192,9 @@ pub enum InstructorAct
     SetGrace
     {
         #[structopt(name = "assignment name")]
-        asgn: OsString,
+        asgn: String,
         #[structopt(name = "user name")]
-        user: OsString,
+        user: String,
         #[structopt(name = "grace amount")]
         ext : i64,
     },
@@ -221,27 +220,27 @@ pub enum InstructorAct
 impl InstructorAct
 {
 
-    fn add_students(user_names: Vec<OsString>, context: &mut Context) -> Result<(),FailLog>
+    fn add_students(user_names: Vec<String>, context: &mut Context) -> Result<(),FailLog>
     {
-        for name in user_names.iter() {
-            if ! context.students.contains(&mut name.clone()) {
-                context.students.push(name.clone());
+        for name in user_names {
+            if !context.students.contains(&name.clone()) {
+                context.students.push(name);
             }
         }
         context.sync()?;
         context.refresh()
     }
 
-    fn remove_students(user_names: Vec<OsString>, context: &mut Context) -> Result<(),FailLog>
+    fn remove_students(user_names: Vec<String>, context: &mut Context) -> Result<(),FailLog>
     {
-        context.students.retain(|os_str| ! user_names.contains(os_str) );
+        context.students.retain(|os_str| !user_names.contains(os_str) );
         context.sync()
     }
 
-    fn add_graders(user_names: Vec<OsString>, context: &mut Context) -> Result<(),FailLog>
+    fn add_graders(user_names: Vec<String>, context: &mut Context) -> Result<(),FailLog>
     {
         for name in user_names.iter() {
-            if ! context.graders.contains(&mut name.clone()) {
+            if !context.graders.contains(&name.clone()) {
                 context.graders.push(name.clone());
             }
         }
@@ -249,17 +248,17 @@ impl InstructorAct
         context.refresh()
     }
 
-    fn remove_graders(user_names: Vec<OsString>, context: &mut Context) -> Result<(),FailLog>
+    fn remove_graders(user_names: Vec<String>, context: &mut Context) -> Result<(),FailLog>
     {
-        context.graders.retain(|os_str| ! user_names.contains(os_str) );
+        context.graders.retain(|os_str| !user_names.contains(os_str) );
         context.sync()
     }
 
-    fn add_assignments(asgn_names: Vec<OsString>, context: &mut Context) -> Result<(),FailLog>
+    fn add_assignments(asgn_names: Vec<String>, context: &mut Context) -> Result<(),FailLog>
     {
-        for name in asgn_names.iter() {
-            if ! context.manifest.contains(&mut name.clone()) {
-                context.manifest.push(name.clone());
+        for name in asgn_names {
+            if !context.manifest.contains(&name.clone()) {
+                context.manifest.push(name);
             }
         }
         context.sync()?;
@@ -268,63 +267,63 @@ impl InstructorAct
         Ok(())
     }
 
-    fn remove_assignments(asgn_names: Vec<OsString>, context: &mut Context) -> Result<(),FailLog>
+    fn remove_assignments(asgn_names: Vec<String>, context: &mut Context) -> Result<(),FailLog>
     {
-        context.manifest.retain(|os_str| ! asgn_names.contains(os_str) );
+        context.manifest.retain(|os_str| !asgn_names.contains(os_str) );
         context.sync()
     }
 
-    fn get_mut_spec<'a>(asgn: &OsString, context: &'a mut Context) -> Result<&'a mut AsgnSpec,FailLog>
+    fn get_mut_spec<'a>(asgn: &String, context: &'a mut Context) -> Result<&'a mut AsgnSpec,FailLog>
     {
         context.catalog.get_mut(asgn)
             .ok_or(FailInfo::InvalidAsgn(asgn.clone()).into_log())?
             .as_mut().map_err(|err| err.clone())
     }
 
-    fn set_due(asgn: OsString, date: OsString, context: &mut Context) -> Result<(),FailLog>
+    fn set_due(asgn: String, date: &str, context: &mut Context) -> Result<(),FailLog>
     {
         let spec : &mut AsgnSpec = Self::get_mut_spec(&asgn,context)?;
-        let date = toml::value::Datetime::from_str(&date.to_string_lossy())
+        let date = toml::value::Datetime::from_str(date)
             .map_err(|err| FailInfo::IOFail(format!("{}",err)))?;
         spec.due_date = Some(util::date_into_chrono(date)?);
         spec.sync()
     }
 
-    fn set_open(asgn: OsString, date: OsString, context: &mut Context) -> Result<(),FailLog>
+    fn set_open(asgn: String, date: &str, context: &mut Context) -> Result<(),FailLog>
     {
-        let spec : &mut AsgnSpec = Self::get_mut_spec(&asgn,context)?;
-        let date = toml::value::Datetime::from_str(&date.to_string_lossy())
+        let spec: &mut AsgnSpec = Self::get_mut_spec(&asgn,context)?;
+        let date = toml::value::Datetime::from_str(date)
             .map_err(|err| FailInfo::IOFail(format!("{}",err)))?;
         spec.open_date = Some(util::date_into_chrono(date)?);
         spec.sync()
     }
 
-    fn set_close(asgn: OsString, date: OsString, context: &mut Context) -> Result<(),FailLog>
+    fn set_close(asgn: String, date: &str, context: &mut Context) -> Result<(),FailLog>
     {
         let spec : &mut AsgnSpec = Self::get_mut_spec(&asgn,context)?;
-        let date = toml::value::Datetime::from_str(&date.to_string_lossy())
+        let date = toml::value::Datetime::from_str(date)
             .map_err(|err| FailInfo::IOFail(format!("{}",err)))?;
         spec.close_date = Some(util::date_into_chrono(date)?);
         spec.sync()
     }
 
-    fn unset_due(asgn: OsString, context: &mut Context) -> Result<(),FailLog>
+    fn unset_due(asgn: String, context: &mut Context) -> Result<(),FailLog>
     {
         let spec : &mut AsgnSpec = Self::get_mut_spec(&asgn,context)?;
         spec.due_date = None;
         spec.sync()
     }
 
-    fn unset_open(asgn: OsString, context: &mut Context) -> Result<(),FailLog>
+    fn unset_open(asgn: String, context: &mut Context) -> Result<(),FailLog>
     {
         let spec : &mut AsgnSpec = Self::get_mut_spec(&asgn,context)?;
         spec.open_date = None;
         spec.sync()
     }
 
-    fn unset_close(asgn: OsString, context: &mut Context) -> Result<(),FailLog>
+    fn unset_close(asgn: String, context: &mut Context) -> Result<(),FailLog>
     {
-        let spec : &mut AsgnSpec = Self::get_mut_spec(&asgn,context)?;
+        let spec: &mut AsgnSpec = Self::get_mut_spec(&asgn,context)?;
         spec.close_date = None;
         spec.sync()
     }
@@ -348,7 +347,7 @@ impl InstructorAct
         context.sync()
     }
 
-    fn publish(asgn: OsString, context: &mut Context) -> Result<(),FailLog>
+    fn publish(asgn: String, context: &mut Context) -> Result<(),FailLog>
     {
         let spec : &mut AsgnSpec = context.catalog.get_mut(&asgn)
             .ok_or(FailInfo::InvalidAsgn(asgn.clone()).into_log())?
@@ -357,7 +356,7 @@ impl InstructorAct
         spec.sync()
     }
 
-    fn unpublish(asgn: OsString, context: &mut Context) -> Result<(),FailLog>
+    fn unpublish(asgn: String, context: &mut Context) -> Result<(),FailLog>
     {
         let spec : &mut AsgnSpec = context.catalog.get_mut(&asgn)
             .ok_or(FailInfo::InvalidAsgn(asgn.clone()).into_log())?
@@ -366,7 +365,7 @@ impl InstructorAct
         spec.sync()
     }
 
-    fn enable(asgn: OsString, context: &mut Context) -> Result<(),FailLog>
+    fn enable(asgn: String, context: &mut Context) -> Result<(),FailLog>
     {
         let spec : &mut AsgnSpec = context.catalog.get_mut(&asgn)
             .ok_or(FailInfo::InvalidAsgn(asgn.clone()).into_log())?
@@ -375,26 +374,26 @@ impl InstructorAct
         spec.sync()
     }
 
-    fn disable(asgn: OsString, context : &mut Context) -> Result<(),FailLog>
+    fn disable(asgn: &str, context : &mut Context) -> Result<(),FailLog>
     {
-        let spec : &mut AsgnSpec = context.catalog.get_mut(&asgn)
-            .ok_or(FailInfo::InvalidAsgn(asgn.clone()).into_log())?
+        let spec : &mut AsgnSpec = context.catalog.get_mut(asgn)
+            .ok_or(FailInfo::InvalidAsgn(asgn.to_owned()).into_log())?
             .as_mut().map_err(|err| err.clone() )?;
         spec.active = false;
         spec.sync()
     }
 
 
-    fn extend(asgn: OsString, user: OsString, ext_days: i64, context : &Context) -> Result<(),FailLog>
+    fn extend(asgn: &str, user: &str, ext_days: i64, context : &Context) -> Result<(),FailLog>
     {
-        let spec : &AsgnSpec = context.catalog.get(&asgn)
-            .ok_or(FailInfo::InvalidAsgn(asgn.clone()).into_log())?
+        let spec : &AsgnSpec = context.catalog.get(asgn)
+            .ok_or(FailInfo::InvalidAsgn(asgn.to_owned()).into_log())?
             .as_ref().map_err(|err| err.clone() )?;
-        let slot = context.get_slot(spec,&user);
+        let slot = context.get_slot(spec,user);
         slot.set_extension(ext_days)
     }
 
-    fn latest_score(old_stats : &StatBlockSet, user : &OsString, build_root: &Path, asgn: &AsgnSpec, context : &Context)
+    fn latest_score(old_stats: &StatBlockSet, user: &str, build_root: &Path, asgn: &AsgnSpec, context: &Context)
      -> Result<Option<StatBlock>,FailLog>
     {
 
@@ -405,22 +404,20 @@ impl InstructorAct
             return Ok(None);
         };
 
-        let user_name = user.clone().into_string().unwrap();
-        let stats = old_stats.get_block(&user_name);
+        let stats = old_stats.get_block(user);
 
         if let Some(stats) = stats {
             let old_time = util::date_into_chrono(stats.time.clone())?;
             if turn_in_time.signed_duration_since(old_time) <= Duration::seconds(1) {
                 println!("{}",format!(
-                    "{} is already up-to-date.",
-                    user.clone().into_string().unwrap()
+                    "{user} is already up-to-date.",
                 ).yellow().bold());
                 return Ok(Some(stats.clone()));
             }
         }
 
         let build_path = build_root.join(&user);
-        asgn.retrieve_sub(&build_path,&user.clone().into_string().unwrap())?;
+        asgn.retrieve_sub(&build_path, user)?;
         if ! build_root.exists() {
             println!("{} does not exist!",build_root.display());
         }
@@ -429,14 +426,13 @@ impl InstructorAct
         }
         let _ = asgn.run_ruleset(context,asgn.build.as_ref(),&build_path,false);
 
-        let user   = user.clone().into_string().unwrap();
         let time   = util::date_from_chrono(turn_in_time);
         let scores = asgn.run_ruleset(context,asgn.score.as_ref(),&build_path,true)
             .ok()
             .unwrap_or(Default::default());
 
         let stat_block = StatBlock {
-            user,
+            user: user.to_owned(),
             time,
             scores
         };
@@ -445,7 +441,7 @@ impl InstructorAct
     }
 
 
-    fn update_scores(asgn: OsString, context : &mut Context) -> Result<(),FailLog>
+    fn update_scores(asgn: String, context: &mut Context) -> Result<(),FailLog>
     {
         let spec : &AsgnSpec = context.catalog.get(&asgn)
             .ok_or(FailInfo::InvalidAsgn(asgn.clone()).into_log())?
@@ -471,10 +467,7 @@ impl InstructorAct
                 }
                 Err(log) => print!("{}",log),
                 _ => {
-                    println!("{}",format!(
-                        "{} has no submission.",
-                        member.clone().into_string().unwrap()
-                    ).yellow().bold());
+                    println!("{}",format!("{member} has no submission.").yellow().bold());
                 },
             }
         }
@@ -486,10 +479,10 @@ impl InstructorAct
 
     fn update_all_scores(context : &mut Context) -> Result<(),FailLog>
     {
-        let ok_asgn : Vec<OsString> = context.manifest.iter()
+        let ok_asgn: Vec<String> = context.manifest.iter()
             .filter_map(|name| context.catalog.get(name) )
-            .filter_map(|asgn| asgn.as_ref().ok() )
-            .map(|asgn| OsString::from(asgn.name.clone()))
+            .filter_map(|asgn| asgn.as_ref().ok())
+            .map(|asgn| asgn.name.clone())
             .collect();
 
         let mut log = FailLog::new();
@@ -523,19 +516,19 @@ impl InstructorAct
             RemGraders  {user_names}   => Self::remove_graders(user_names,context),
             AddAsgns    {asgn_names}   => Self::add_assignments(asgn_names,context),
             RemAsgns    {asgn_names}   => Self::remove_assignments(asgn_names,context),
-            SetDue      {asgn,date}    => Self::set_due(asgn,date,context),
-            SetOpen     {asgn,date}    => Self::set_open(asgn,date,context),
-            SetClose    {asgn,date}    => Self::set_close(asgn,date,context),
+            SetDue      {asgn,date}    => Self::set_due(asgn,&date,context),
+            SetOpen     {asgn,date}    => Self::set_open(asgn,&date,context),
+            SetClose    {asgn,date}    => Self::set_close(asgn,&date,context),
             UnsetDue    {asgn}         => Self::unset_due(asgn,context),
             UnsetOpen   {asgn}         => Self::unset_open(asgn,context),
             UnsetClose  {asgn}         => Self::unset_close(asgn,context),
             Publish     {asgn}         => Self::publish(asgn,context),
             Unpublish   {asgn}         => Self::unpublish(asgn,context),
             Enable      {asgn}         => Self::enable(asgn,context),
-            Disable     {asgn}         => Self::disable(asgn,context),
+            Disable     {asgn}         => Self::disable(&asgn,context),
             UpdateScores{asgn}         => Self::update_scores(asgn,context),
             UpdateAllScores{}          => Self::update_all_scores(context),
-            Extend   {asgn,user,ext}   => Self::extend(asgn,user,ext,context),
+            Extend   {asgn,user,ext}   => Self::extend(&asgn,&user,ext,context),
             SetGrace {asgn,user,ext}   => StudentAct::grace(&asgn,&user,ext,context),
             GraceTotal  {num}          => Self::grace_total(num,context),
             GraceLimit  {num}          => Self::grace_limit(num,context),
