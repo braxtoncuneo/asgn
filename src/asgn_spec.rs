@@ -2,7 +2,7 @@ use std::{
     fs,
     path::{PathBuf, Path},
     process::Stdio,
-    os::unix::fs::MetadataExt,
+    os::unix::fs::MetadataExt, io,
 };
 
 use itertools::Itertools;
@@ -43,7 +43,7 @@ pub struct Ruleset {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct StatBlock {
-    pub user: String,
+    pub username: String,
     pub time: toml::value::Datetime,
     pub scores: toml::value::Table,
 }
@@ -53,9 +53,14 @@ pub struct StatBlockSet {
     pub stat_block: Option<Vec<StatBlock>>
 }
 
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct FatalError;
 
+impl From<FailLog> for FatalError {
+    fn from(_: FailLog) -> Self { Self }
+}
 
-#[derive(Serialize,Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct AsgnSpecToml {
     name: String,
     active: bool,
@@ -74,7 +79,7 @@ pub struct AsgnSpecToml {
 impl Default for AsgnSpecToml {
     fn default() -> Self {
         Self {
-            name: "<put name here>".to_string(),
+            name: "<put name here>".to_owned(),
             active: false,
             visible: false,
             due_date: None,
@@ -172,12 +177,10 @@ impl AsgnSpec {
         })
     }
 
-    pub fn load(path: impl AsRef<Path>) -> Result<Self,FailLog> {
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, FailLog> {
         let path = path.as_ref();
         let spec_path = path.join(".info");
         let info_path = spec_path.join("info.toml");
-
-        // println!("{}",info_path.display());
 
         let info_text = fs::read_to_string(info_path).map_err(|err|
             FailInfo::NoSpec(
@@ -188,14 +191,14 @@ impl AsgnSpec {
         )?;
 
         let spec_toml: AsgnSpecToml = toml::from_str(&info_text).map_err(|err|
-            FailInfo::BadSpec("assignment".to_string(), err.to_string()).into_log()
+            FailInfo::BadSpec("assignment".to_owned(), err.to_string()).into_log()
         )?;
 
         let spec = Self::from_toml(spec_toml, path.to_owned())?;
 
         if !path.ends_with(&spec.name) {
             return Err(FailInfo::BadSpec(
-                "assignment".to_string(),
+                "assignment".to_owned(),
                 String::from("Name field does not match assignment directory name.")
             ).into());
         }
@@ -235,10 +238,10 @@ impl AsgnSpec {
     }
 
     pub fn details(&self, context: &Context) -> Result<Table, FailLog> {
-        let sub_dir = context.base_path.join(&self.name).join(&context.user);
+        let sub_dir = context.base_path.join(&self.name).join(&context.username);
 
         let slot = SubmissionSlot {
-            context:   context,
+            context,
             asgn_spec: self,
             base_path: sub_dir,
         };
@@ -246,23 +249,23 @@ impl AsgnSpec {
         let status = slot.status().unwrap();
 
         let mut table = Table::new(2);
-        table.add_row(vec!["PROPERTY".to_string(),"VALUE".to_string()])?;
-        table.add_row(vec!["NAME".to_string(), self.name.clone()])?;
-        table.add_row(vec!["FILES".to_string(), self.file_list.iter().join(" ")])?;
+        table.add_row(vec!["PROPERTY".to_owned(), "VALUE".to_owned()])?;
+        table.add_row(vec!["NAME".to_owned(), self.name.clone()])?;
+        table.add_row(vec!["FILES".to_owned(), self.file_list.iter().join(" ")])?;
         table.add_row(vec![
-            "OPEN DATE".to_string(),
-            self.open_date.as_ref().map(|d| d.to_string()).unwrap_or("NONE".to_string()),
+            "OPEN DATE".to_owned(),
+            self.open_date.as_ref().map(|d| d.to_string()).unwrap_or("NONE".to_owned()),
         ])?;
         table.add_row(vec![
-            "CLOSE DATE".to_string(),
-            self.close_date.map(|d| d.to_string()).unwrap_or("NONE".to_string()),
+            "CLOSE DATE".to_owned(),
+            self.close_date.map(|d| d.to_string()).unwrap_or("NONE".to_owned()),
         ])?;
         table.add_row(vec![
-            "DUE DATE".to_string(),
-            self.due_date.map(|d| d.to_string()).unwrap_or("NONE".to_string()),
+            "DUE DATE".to_owned(),
+            self.due_date.map(|d| d.to_string()).unwrap_or("NONE".to_owned()),
         ])?;
-        table.add_row(vec!["EXTENSION".to_string(), status.extension_days.to_string()])?;
-        table.add_row(vec!["GRACE".to_string(), status.grace_days.to_string()])?;
+        table.add_row(vec!["EXTENSION".to_owned(), status.extension_days.to_string()])?;
+        table.add_row(vec!["GRACE".to_owned(), status.grace_days.to_string()])?;
 
         Ok(table)
     }
@@ -290,15 +293,14 @@ impl AsgnSpec {
             "PRIVATE={}",
             self.path.join(".info").join("private").display()
         ));
-        cmd.arg(format!("--file={}",path.display()));
+        cmd.arg(format!("--file={}", path.display()));
         cmd.arg(target);
         cmd
     }
 
-
-    pub fn run_rule(&self, context: &Context, rule: &Rule, path: &Path) -> Result<bool, ()> {
+    pub fn run_rule(&self, context: &Context, rule: &Rule, path: &Path) -> Result<bool, FatalError> {
         let wait_text = rule.wait_text.as_ref()
-            .unwrap_or(&format!("Executing '{}'.",&rule.target))
+            .unwrap_or(&format!("Executing '{}'.", &rule.target))
             .yellow().bold();
         println!("{wait_text}");
 
@@ -313,13 +315,13 @@ impl AsgnSpec {
         cmd.stdout(Stdio::inherit());
         cmd.stderr(Stdio::inherit());
 
-        let status = util::run_at(cmd,&path,false).map_err(drop)?;
+        let status = util::run_at(cmd, path, false)?;
 
         if status.success() {
             let pass_text = rule.pass_text.clone()
-                .unwrap_or(format!("'{}' passed.",&rule.target));
-            let pass_text = format!("! {}", pass_text)
-                .green();
+                .unwrap_or(format!("'{}' passed.", &rule.target));
+            let pass_text = format!("! {}", pass_text).green();
+
             println!("{pass_text}");
             let target = path.join(&rule.target);
             if target.exists() {
@@ -328,51 +330,53 @@ impl AsgnSpec {
 
             Ok(true)
         } else {
-            let fail_text = rule.fail_text.clone()
-                .unwrap_or(format!("'{}' failed.", &rule.target));
+            let fail_text = rule.fail_text.clone().unwrap_or_else(|| format!("'{}' failed.", &rule.target));
             let fail_text = format!("! {}", fail_text).red();
             let help_text = rule.help_text.as_ref().map(|t|t.yellow().to_string());
-            if ! rule.fail_okay.unwrap_or(false) {
+
+            if rule.fail_okay != Some(true) {
                 println!("{fail_text}");
                 if let Some(help) = help_text {
-                    println!("{}",format!("> {}",help).yellow());
+                    println!("{}", format!("> {}", help).yellow());
                 }
-                Err(())
+                Err(FatalError)
             } else {
                 println!("{fail_text}");
                 if let Some(help) = help_text {
-                    println!("{}",format!("> {}",help).yellow());
+                    println!("{}", format!("> {}", help).yellow());
                 }
                 Ok(false)
             }
         }
     }
 
-
-    fn log_metric(scores : &mut toml::value::Table, target : &str, result : &str, kind : &str)
-    {
+    fn log_metric(scores: &mut toml::value::Table, target: &str, result: &str, kind: &str) {
         let score = match kind {
-            "bool"  => result.parse::<bool>().map(|v| toml::Value::Boolean(v)).ok(),
-            "int"   => result.parse::<i64>() .map(|v| toml::Value::Integer(v)).ok(),
-            "float" => result.parse::<f64>() .map(|v| toml::Value::Float  (v)).ok(),
+            "bool"  => result.parse::<bool>().map(toml::Value::Boolean).ok(),
+            "int"   => result.parse::<i64 >().map(toml::Value::Integer).ok(),
+            "float" => result.parse::<f64 >().map(toml::Value::Float  ).ok(),
             _ => {
-                println!("{}",format!("! Metric '{}' has invalid kind '{}'",target,kind).red());
+                println!("{}", format!("! Metric '{target}' has invalid kind '{kind}'").red());
                 return;
             },
         };
-        if let Some(score) = score {
-            scores.insert(target.to_string(), score);
-            println!("{}",format!("Metric '{}' had value '{}'", target, result).yellow().bold());
-        } else {
-            println!("{}",format!(
-                "Metric '{}' had result '{}' which could not be parsed into kind '{}'",
-                target, result, kind
-            ).red());
-        }
+
+        let Some(score) = score else {
+            println!("{}", format!("Metric '{target}' had result '{result}' which failed to parse into '{kind}'").red());
+            return;
+        };
+
+        scores.insert(target.to_string(), score);
+        println!("{}", format!("Metric '{target}' had value '{result}'").yellow().bold());
     }
 
-    pub fn run_ruleset(&self, context: &Context, ruleset: Option<&Ruleset>, path: &Path, is_metric: bool)
-    -> Result<toml::value::Table,()>
+    pub fn run_ruleset(
+        &self,
+        context: &Context,
+        ruleset: Option<&Ruleset>,
+        path: &Path,
+        is_metric: bool,
+    ) -> Result<toml::value::Table, FatalError>
     {
         let mut scores = toml::value::Table::default();
 
@@ -402,7 +406,7 @@ impl AsgnSpec {
                         failed += 1;
                     }
                 },
-                Err(()) => {
+                Err(FatalError) => {
                     failed += 1;
                     fatal = true;
                     break;
@@ -410,129 +414,140 @@ impl AsgnSpec {
             }
 
             if did_pass && is_metric {
-                let result = fs::read_to_string(path.join(&rule.target))
-                    .map_err(|err| FailInfo::IOFail(format!("Failed to read score : '{}'",err)).into_log());
+                let result = fs::read_to_string(path.join(&rule.target)).map_err(|err|
+                    FailInfo::IOFail(format!("Failed to read score: '{err}'")
+                ).into_log());
+
                 match (rule.kind.as_ref(), result) {
-                    (Some(kind),Ok(result)) => Self::log_metric(&mut scores,&rule.target,&result,&kind),
-                    (None,Ok(_result)) => {
-                        println!("{}",format!("! Metric '{}' has no kind.",&rule.target).red());
-                    }
-                    (_,Err(log))   => print!("{}",log),
+                    (Some(kind), Ok(result)) => Self::log_metric(&mut scores, &rule.target, &result, kind),
+                    (None, Ok(_result)) => println!("{}", format!("! Metric '{}' has no kind.", rule.target).red()),
+                    (_, Err(log)) => print!("{log}"),
                 }
             }
         }
         if fatal {
-            println!("{}",format!("! {}","Execution cannot continue beyond this error.").red());
+            println!("{}", format!("! {}", "Execution cannot continue beyond this error.").red());
         }
         util::print_hline();
         let not_reached = count-passed-failed;
         println!("! {count} total targets - {passed} passed, {failed} failed, {not_reached} not reached.");
 
         if fatal {
-            return Err(());
+            return Err(FatalError);
         }
 
         Ok(scores)
     }
 
 
-    pub fn run_on_submit(&self, context: &Context, ruleset : Option<&Ruleset>, path: &Path, title: &str, is_metric: bool)
-    -> Option<Result<toml::value::Table,()>>
+    pub fn run_on_submit(
+        &self,
+        context: &Context,
+        ruleset: Option<&Ruleset>,
+        path: &Path,
+        title: &str,
+        is_metric: bool,
+    ) -> Option<Result<toml::value::Table, FatalError>>
     {
-        if let Some(set) = ruleset {
-            if set.on_submit.unwrap_or(true) {
+        match ruleset {
+            Some(Ruleset { on_submit: Some(true) | None, .. }) => {
                 util::print_bold_hline();
-                println!("{}",title.yellow().bold());
-                return Some(self.run_ruleset(context,Some(set),path,is_metric));
+                println!("{}", title.yellow().bold());
+                Some(self.run_ruleset(context, ruleset, path, is_metric))
             }
+            _ => None,
         }
-        return None;
     }
 
-    pub fn run_on_grade(&self, context: &Context, ruleset : Option<&Ruleset>, path: &Path, title: &str, is_metric: bool)
-    -> Option<Result<toml::value::Table,()>>
+    pub fn run_on_grade(
+        &self,
+        context: &Context,
+        ruleset : Option<&Ruleset>,
+        path: &Path,
+        title: &str,
+        is_metric: bool,
+    ) -> Option<Result<toml::value::Table, FatalError>>
     {
-        if let Some(set) = ruleset {
-            if set.on_grade.unwrap_or(true) {
+        match ruleset {
+            Some(Ruleset { on_grade: Some(true) | None, .. }) => {
                 util::print_bold_hline();
-                println!("{}",title.yellow().bold());
-                return Some(self.run_ruleset(context,Some(set),path,is_metric));
+                println!("{}", title.yellow().bold());
+                Some(self.run_ruleset(context, ruleset, path, is_metric))
             }
+            _ => None,
         }
-        return None;
     }
 
-    pub fn retrieve_sub(&self, dst_dir : &Path, user : &str)
-    -> Result<(),FailLog>
-    {
-        let sub_path = self.path.join(user);
+    pub fn retrieve_sub(&self, dst_dir: &Path, username: &str) -> Result<(), FailLog> {
+        let sub_path = self.path.join(username);
 
         if dst_dir.is_dir() {
-            fs::remove_dir_all(&dst_dir).map_err(|err|
+            fs::remove_dir_all(dst_dir).map_err(|err|
                 FailInfo::IOFail(format!("could not remove directory {}: {}", dst_dir.display(), err)).into_log()
             )?;
         }
+
         if dst_dir.is_file() {
-            fs::remove_file(&dst_dir).map_err(|err|
+            fs::remove_file(dst_dir).map_err(|err|
                 FailInfo::IOFail(format!("could not remove file {}: {}", dst_dir.display(), err)).into_log()
             )?;
         }
-        fs::create_dir(&dst_dir).map_err(|err|
+
+        fs::create_dir(dst_dir).map_err(|err|
             FailInfo::IOFail(format!("could not create directory {}: {}", dst_dir.display(), err)).into_log()
         )?;
 
-        for file_name in self.file_list.iter() {
+        for file_name in &self.file_list {
             let src_path = sub_path.join(file_name);
             let dst_path = dst_dir .join(file_name);
             if src_path.is_dir() {
                 continue;
             }
 
-            if ! src_path.exists() {
+            if !src_path.exists() {
                 return Err(FailInfo::Custom(
-                    format!("could not copy file {} to {}", (&src_path).display(), (&dst_path).display()),
-                    format!("File does not exist in the submission directory.")
+                    format!("could not copy file {} to {}", src_path.display(), dst_path.display()),
+                    "File does not exist in the submission directory.".to_owned(),
                 ).into_log());
             }
 
-            fs::copy(&src_path,&dst_path).map_err(|err|
-                FailInfo::IOFail(
-                    format!("could not copy file {} to {} : {}",
-                    (&src_path).display(),(&dst_path).display(),err)
-                ).into_log()
+            fs::copy(&src_path, &dst_path).map_err(|err|
+                FailInfo::IOFail(format!(
+                    "could not copy file {} to {}: {}",
+                    src_path.display(), dst_path.display(), err,
+                )).into_log()
             )?;
         }
 
         Ok(())
     }
-
 }
 
 
 pub struct SubmissionSlot <'ctx> {
-    pub context   : &'ctx Context,
-    pub asgn_spec : &'ctx AsgnSpec,
-    pub base_path : PathBuf,
+    pub context: &'ctx Context,
+    pub asgn_spec: &'ctx AsgnSpec,
+    pub base_path: PathBuf,
 }
 
 pub struct SubmissionStatus {
-    pub turn_in_time   : Option<DateTime<Local>>,
-    pub grace_days     : i64,
-    pub extension_days : i64,
+    pub turn_in_time: Option<DateTime<Local>>,
+    pub grace_days: i64,
+    pub extension_days: i64,
 }
 
 #[derive(Serialize, Deserialize)]
 struct GraceToml {
-    pub value : i64,
+    pub value: i64,
 }
 
 #[derive(Serialize, Deserialize)]
 struct ExtensionToml {
-    pub value : i64,
+    pub value: i64,
 }
 
 
-impl <'ctx> SubmissionSlot<'ctx> {
+impl<'ctx> SubmissionSlot<'ctx> {
     pub fn grace_path(&self) -> PathBuf {
         self.base_path.join(".grace")
     }
@@ -541,42 +556,40 @@ impl <'ctx> SubmissionSlot<'ctx> {
         self.base_path.join(".extension")
     }
 
-    pub fn file_paths<'a>(&'a self) -> impl 'a + Iterator<Item=PathBuf> {
+    pub fn file_paths(&self) -> impl '_ + Iterator<Item=PathBuf> {
         self.asgn_spec.file_list.iter()
             .map(|name| self.base_path.join(name))
     }
 
     pub fn get_grace(&self) -> Result<i64, FailLog> {
-        let toml_text = fs::read_to_string(self.grace_path()).map_err(|err|
-            FailInfo::IOFail(format!("reading grace file: {}",err)).into_log()
-        );
-        if toml_text.is_err() {
-            return Ok(0);
-        }
-        let grace : GraceToml = toml::from_str(&toml_text.unwrap()).map_err(|err|
-            FailInfo::IOFail(format!("deserializing grace file: {}",err)).into_log()
+        let toml_text = match fs::read_to_string(self.grace_path()) {
+            Ok(toml_text) => toml_text,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(0),
+            Err(err) => return Err(FailInfo::IOFail(format!("reading grace file: {err}")).into_log()),
+        };
+
+        let grace: GraceToml = toml::from_str(&toml_text).map_err(|err|
+            FailInfo::IOFail(format!("deserializing grace file: {err}")).into_log()
         )?;
+
         Ok(grace.value)
     }
 
-    pub fn set_grace(&self, value: i64) -> Result<(),FailLog> {
+    pub fn set_grace(&self, value: i64) -> Result<(), FailLog> {
         let grace_toml = GraceToml { value };
-        let toml_text  = toml::to_string(&grace_toml).map_err(|err|
-            FailInfo::IOFail(format!("serializing grace file : {}",err)).into_log()
+        let toml_text = toml::to_string(&grace_toml).map_err(|err|
+            FailInfo::IOFail(format!("serializing grace file: {err}")).into_log()
         )?;
-        fs::write(self.grace_path(),toml_text).map_err(|err|
-            FailInfo::IOFail(format!("writing grace file : {}",err)).into_log()
+        fs::write(self.grace_path(), toml_text).map_err(|err|
+            FailInfo::IOFail(format!("writing grace file: {err}")).into_log()
         )?;
         Ok(())
     }
 
-    pub fn get_extension(&self) -> Result<i64,FailLog> {
+    pub fn get_extension(&self) -> Result<i64, FailLog> {
         let ext_path = self.extension_path();
 
-        if !ext_path.exists() {
-            return Ok(0);
-        }
-        if ext_path.is_dir() {
+        if !ext_path.exists() || ext_path.is_dir() {
             return Ok(0);
         }
 
@@ -584,14 +597,14 @@ impl <'ctx> SubmissionSlot<'ctx> {
             .map_err(|err| FailInfo::IOFail(err.to_string()))?.uid();
 
         let owner = get_user_by_uid(owner_uid)
-            .ok_or(FailInfo::InvalidUID())?
+            .ok_or(FailInfo::InvalidUID(owner_uid))?
             .name().to_str().unwrap()
             .to_owned();
 
         if owner != self.context.instructor {
             return Err(FailInfo::IOFail(format!(
                 "Extension file at {} was not made by instructor!",
-                ext_path.display()
+                ext_path.display(),
             )).into());
         }
 
@@ -606,25 +619,25 @@ impl <'ctx> SubmissionSlot<'ctx> {
         Ok(ext.value)
     }
 
-    pub fn set_extension(&self, value: i64) -> Result<(),FailLog> {
+    pub fn set_extension(&self, value: i64) -> Result<(), FailLog> {
         let ext_toml = ExtensionToml { value };
-        let toml_text  = toml::to_string(&ext_toml).map_err(|err|
-            FailInfo::IOFail(format!("serializing extension file : {}",err)).into_log()
+        let toml_text = toml::to_string(&ext_toml).map_err(|err|
+            FailInfo::IOFail(format!("serializing extension file: {err}")).into_log()
         )?;
-        fs::write(self.extension_path(),toml_text).map_err(|err|
-            FailInfo::IOFail(format!("writing extension file : {}",err)).into_log()
+        fs::write(self.extension_path(), toml_text).map_err(|err|
+            FailInfo::IOFail(format!("writing extension file: {err}")).into_log()
         )?;
         Ok(())
     }
 
-    pub fn status(&self) -> Result<SubmissionStatus,FailLog> {
+    pub fn status(&self) -> Result<SubmissionStatus, FailLog> {
         let submitted = self.file_paths().all(|p| p.is_file());
 
         let time: Option<i64> = if submitted {
             let mut mtime: i64 = 0;
-            for path in self.file_paths().into_iter() {
+            for path in self.file_paths() {
                 let meta = fs::metadata(path).map_err(|err|{
-                    FailInfo::IOFail(format!("{}",err.kind())).into_log()
+                    FailInfo::IOFail(err.kind().to_string()).into_log()
                 })?;
                 mtime = mtime.max(meta.mtime());
             }
@@ -634,9 +647,9 @@ impl <'ctx> SubmissionSlot<'ctx> {
         };
 
         let turn_in_time = if let Some(seconds) = time {
-            let turn_in = Local.timestamp_opt(seconds,0)
+            let turn_in = Local.timestamp_opt(seconds, 0)
                 .earliest()
-                .ok_or(FailInfo::IOFail("Impossible time conversion".to_string()).into_log())?;
+                .ok_or(FailInfo::IOFail("Impossible time conversion".to_owned()).into_log())?;
             Some(turn_in)
         } else {
             None
@@ -658,46 +671,41 @@ impl SubmissionStatus {
 
     pub fn versus(&self, time: Option<&DateTime<Local>>) -> String {
         let Some(time) = time else {
-            if self.turn_in_time.is_some() {
-                return String::from("Submitted");
+            return match self.turn_in_time {
+                Some(_) => "Submitted",
+                None => "Not Submitted",
+            }.to_owned();
+        };
+
+        let Some(late_by) = self.time_past(time) else {
+            let time_diff = chrono::offset::Local::now().signed_duration_since(*time);
+
+            return if time_diff.num_seconds() <= 0 {
+                String::from("Not Submitted")
             } else {
-                return String::from("Not Submitted");
+                String::from("Missing")
             }
         };
 
-        let late_by = self.time_past(time);
-
-        if late_by.is_none() {
-            let time_diff = chrono::offset::Local::now()
-                .signed_duration_since(*time);
-            if time_diff.num_seconds() <= 0 {
-                return String::from("Not Submitted");
-            } else {
-                return String::from("Missing");
-            }
-        }
-
-        let late_by = late_by.unwrap();
-
         let mut total : i64 = 0;
-        let days : i64 = late_by.num_days();
+        let days: i64 = late_by.num_days();
         total += days;
         total *= 24;
-        let hours : i64 = late_by.num_hours() - total;
+        let hours: i64 = late_by.num_hours() - total;
         total += hours;
         total *= 60;
-        let mins : i64 = late_by.num_minutes() - total;
+        let mins: i64 = late_by.num_minutes() - total;
 
         if late_by.num_seconds() > 0 {
-            format!("Late {}d {}h {}m",days,hours,mins)
+            format!("Late {days}d {hours}h {mins}m")
         } else {
-            format!("Early {}d {}h {}m",-days,-hours,-mins)
+            format!("Early -{days}d -{hours}h -{mins}m")
         }
     }
 }
 
 impl StatBlockSet {
-    pub fn get_block(&self, user: &str) -> Option<&StatBlock> {
-        self.stat_block.iter().flatten().find(|block| block.user == user)
+    pub fn get_block(&self, username: &str) -> Option<&StatBlock> {
+        self.stat_block.iter().flatten().find(|block| block.username == username)
     }
 }

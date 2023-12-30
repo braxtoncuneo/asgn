@@ -16,16 +16,16 @@ use colored::Colorize;
 use walkdir::WalkDir;
 use chrono::{TimeZone, Datelike, Timelike};
 
-pub fn print_hline () {
+pub fn print_hline() {
     match terminal_size() {
-        Ok((w,_h)) => println!("{:-<1$}","",w as usize),
+        Ok((w, _)) => println!("{:-<1$}", "", w as usize),
         Err(_) => println!(),
     }
 }
 
 pub fn print_bold_hline () {
     match terminal_size() {
-        Ok((w,_h)) => println!("{}",format!("{:=<1$}","",w as usize).bold()),
+        Ok((w, _)) => println!("{}", format!("{:=<1$}", "", w as usize).bold()),
         Err(_) => println!(),
     }
 }
@@ -72,7 +72,7 @@ pub fn set_mode(path: impl AsRef<Path>, mode: u32) -> Result<(), FailLog> {
 
 #[derive(Clone)]
 pub struct FaclEntry {
-    pub user: String,
+    pub username: String,
     pub read: bool,
     pub write: bool,
     pub exe: bool,
@@ -80,7 +80,7 @@ pub struct FaclEntry {
 
 impl fmt::Display for FaclEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:", self.user)?;
+        write!(f, "{}:", self.username)?;
         if self.read  { f.write_char('r')?; }
         if self.write { f.write_char('w')?; }
         if self.exe   { f.write_char('x')?; }
@@ -148,17 +148,7 @@ pub fn refresh_dir<'facl>(
     facl: impl Iterator<Item=&'facl FaclEntry> + Clone,
 ) -> Result<(), FailLog>
 {
-
     let path = path.as_ref();
-
-    /*
-    if path.exists() && path.is_file() {
-        fs::remove_file(path)
-            .map_err(|err| -> FailLog {
-                FailInfo::IOFail(format!("removing file {} : {}",path.display(),err)).into()
-            })?;
-    }
-    */
 
     if !path.exists() {
         fs::create_dir(path).map_err(|err|
@@ -168,8 +158,8 @@ pub fn refresh_dir<'facl>(
 
     set_mode(path, mode)?;
 
-    set_facl(path,false,facl.clone())?;
-    set_facl(path,true, facl)?;
+    set_facl(path, false, facl.clone())?;
+    set_facl(path, true, facl)?;
 
     Ok(())
 }
@@ -207,17 +197,16 @@ pub fn recursive_refresh_dir<'facl> (
 
 pub fn bashrc_append_line(line: &str) -> Result<(), FailLog> {
     let home_path: PathBuf = dirs::home_dir().ok_or_else(||
-        FailInfo::IOFail("Home directory cannot be determined".to_string()).into_log()
+        FailInfo::IOFail("Home directory cannot be determined".to_owned()).into_log()
     )?;
 
     let bashrc_path : PathBuf = home_path.join(".bashrc");
     let mut bashrc = fs::OpenOptions::new()
-        .write(true)
         .append(true)
         .open(bashrc_path)
         .map_err(|err| FailInfo::IOFail(err.to_string()))?;
 
-    writeln!(bashrc,"{line}").map_err(|err|
+    writeln!(bashrc, "{line}").map_err(|err|
         FailInfo::IOFail(err.to_string())
     )?;
 
@@ -236,36 +225,32 @@ pub fn make_fresh_dir(path: &Path, base_name: &str) -> PathBuf {
     };
 
     while gen_path(idx).exists() {
-        idx = idx.map(|i| i+1).or(Some(0));
+        idx = idx.map(|i| i + 1).or(Some(0));
     }
 
     gen_path(idx)
 }
 
 pub fn date_into_chrono(deadline: toml::value::Datetime) -> Result<chrono::DateTime<chrono::Local>, FailLog> {
-    let (hr,min,sec): (u32,u32,u32) =
+    let (hr, min, sec): (u32, u32, u32) =
         if let Some(time) = deadline.time {
-            (time.hour.into(),time.minute.into(),time.second.into())
+            (time.hour.into(), time.minute.into(), time.second.into())
         } else {
-            (23,59,59)
+            (23, 59, 59)
         };
 
-    let result = match deadline.date {
+    match deadline.date {
         Some(date) => {
-            let y : i32 = date.year  as i32;
-            let m : u32 = date.month as u32;
-            let d : u32 = date.day   as u32;
-            Ok(chrono::offset::Local.with_ymd_and_hms(y,m,d,hr,min,sec).unwrap())
+            let y: i32 = date.year  as i32;
+            let m: u32 = date.month as u32;
+            let d: u32 = date.day   as u32;
+            Ok(chrono::offset::Local.with_ymd_and_hms(y, m, d, hr, min, sec).unwrap())
         },
         None => Err(FailInfo::BadSpec(
-            "assignment".to_string(),
+            "assignment".to_owned(),
             String::from("Date data missing from deadline field.")
         ).into_log()),
-    };
-
-    let result = result?;
-    //println!("-> {} <- ",result);
-    Ok(result)
+    }
 }
 
 pub fn date_from_chrono(deadline : chrono::DateTime<chrono::Local>) -> toml::value::Datetime{
@@ -290,22 +275,20 @@ pub fn date_from_chrono(deadline : chrono::DateTime<chrono::Local>) -> toml::val
 
 pub fn parse_from<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, FailLog> {
     let text = fs::read_to_string(path).map_err(|err|
-        FailInfo::IOFail(format!("reading file: {}",err)).into_log()
+        FailInfo::IOFail(format!("reading file: {err}")).into_log()
     )?;
 
-    let result = toml::from_str(&text).map_err(|err|
-        FailInfo::IOFail(format!("deserializing file: {}",err)).into_log()
-    );
-
-    result
+    toml::from_str(&text).map_err(|err|
+        FailInfo::IOFail(format!("deserializing file: {err}")).into_log()
+    )
 }
 
 pub fn serialize_into<T: serde::ser::Serialize>(path: &Path, value: &T) -> Result<(), FailLog> {
     let toml_text  = toml::to_string(value).map_err( |err|
-        FailInfo::IOFail(format!("serializing extension file: {}",err)).into_log()
+        FailInfo::IOFail(format!("serializing extension file: {err}")).into_log()
     )?;
 
-    fs::write(path,toml_text).map_err(|err|
-        FailInfo::IOFail(format!("writing extension file: {}",err)).into_log()
+    fs::write(path, toml_text).map_err(|err|
+        FailInfo::IOFail(format!("writing extension file: {err}")).into_log()
     )
 }

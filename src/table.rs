@@ -6,7 +6,7 @@ use itertools::Itertools;
 
 pub struct Table {
     width: usize,
-    rows: Vec<Vec<String>>,
+    rows: Vec<Box<[String]>>,
 }
 
 impl Table {
@@ -17,11 +17,13 @@ impl Table {
         }
     }
 
-    pub fn add_row(&mut self, row: Vec<String>) -> Result<(), FailLog> {
+    pub fn add_row(&mut self, row: impl Into<Box<[String]>>) -> Result<(), FailLog> {
+        let row = row.into();
+
         if row.len() != self.width {
             return Err(FailInfo::Custom(
-                "Internal Error: Attempted to add a row to a table with a different width".to_string(),
-                "Contact the instructor.".to_string()
+                "Internal Error: Attempted to add a row to a table with a different width".to_owned(),
+                "Contact the instructor.".to_owned()
             ).into_log());
         }
 
@@ -29,7 +31,7 @@ impl Table {
         Ok(())
     }
 
-    fn as_table_row(row: &Vec<String>, col_widths: &[usize]) -> String {
+    fn as_table_row(row: &[String], col_widths: &[usize]) -> String {
         row.iter()
             .zip(col_widths)
             .map(|(text, width)| format!(" {text:width$} "))
