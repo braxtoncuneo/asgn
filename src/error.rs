@@ -9,6 +9,7 @@ pub enum Error {
     FormatFail(String),
     StyleFail(String),
     TestFail(String),
+    TableError,
     NoSpec(String, String),
     BadSpec(String, String),
     IOFail(String),
@@ -48,6 +49,7 @@ impl Error {
             FormatFail(err)     => format!("{}\n\n{}", "Failed to format files. Error:".red(), err),
             StyleFail(err)      => format!("{}\n\n{}", "Failed to check style. Error:".red(), err),
             TestFail(err)       => format!("{}\n\n{}", "Failed to test functionality due to internal error. Error:".red(), err),
+            TableError          => format!("{}", "Failure while constructing output table.".red()),
             MissingFile(name)   => format!("{} '{}' {}", "File".red(), name, "does not exist in current working directory.".red()),
             MissingSub(name)    => format!("{} '{}' {}", "File".red(), name, "does not exist in the submission directory".red()),
             FileIsDir(name)     => format!("{} '{}' {}", "File".red(), name, "is actually a directory".red()),
@@ -73,6 +75,7 @@ impl Error {
             | IOFail(_)
             | InvalidUID(_)
             | TestFail(_)
+            | TableError
             | Unauthorized() => format!("{}", "Please contact the instructor.".yellow()),
 
             InvalidAsgn(_)
