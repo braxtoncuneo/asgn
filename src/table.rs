@@ -1,6 +1,6 @@
 use core::fmt;
 
-use crate::fail_info::{FailLog, FailInfo};
+use crate::error::Error;
 use colored::Colorize;
 use itertools::Itertools;
 
@@ -17,14 +17,14 @@ impl Table {
         }
     }
 
-    pub fn add_row(&mut self, row: impl Into<Box<[String]>>) -> Result<(), FailLog> {
+    pub fn add_row(&mut self, row: impl Into<Box<[String]>>) -> Result<(), Error> {
         let row = row.into();
 
         if row.len() != self.width {
-            return Err(FailInfo::Custom(
+            return Err(Error::Custom(
                 "Internal Error: Attempted to add a row to a table with a different width".to_owned(),
                 "Contact the instructor.".to_owned()
-            ).into_log());
+            ));
         }
 
         self.rows.push(row);
