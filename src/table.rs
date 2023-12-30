@@ -1,86 +1,69 @@
+use core::fmt;
 
-use crate::fail_info:: {
-    FailLog,
-    FailInfo,
-};
-
+use crate::fail_info::{FailLog, FailInfo};
 use colored::Colorize;
-
-
+use itertools::Itertools;
 
 pub struct Table {
-    width  : usize,
-    rows : Vec<Vec<String>>,
+    width: usize,
+    rows: Vec<Box<[String]>>,
 }
 
 impl Table {
-
-    pub fn new(width : usize) -> Self {
+    pub fn new(width: usize) -> Self {
         Table {
             width,
             rows: Vec::new(),
         }
     }
 
-    pub fn add_row(&mut self,row : Vec<String>) -> Result<(),FailLog> {
+    pub fn add_row(&mut self, row: impl Into<Box<[String]>>) -> Result<(), FailLog> {
+        let row = row.into();
+
         if row.len() != self.width {
             return Err(FailInfo::Custom(
-                "Internal Error: Attempted to add a row to a table with a different width".to_string(),
-                "Contact the instructor.".to_string()
+                "Internal Error: Attempted to add a row to a table with a different width".to_owned(),
+                "Contact the instructor.".to_owned()
             ).into_log());
         }
+
         self.rows.push(row);
         Ok(())
     }
 
-    fn as_table_row(row : &Vec<String>, col_widths : &Vec<usize>) -> String {
-        row .iter()
-            .zip(col_widths.iter())
-            .enumerate()
-            .map(|(idx,(text,width))| {
-                if idx == 0 {
-                    format!(" {:width$} ",text,width = width)
-                } else {
-                    format!("| {:width$} ",text,width = width)
-                }
-            }).fold(String::new(),|acc,val| acc + &val)
-    }
-
-    pub fn as_table(&self) -> String {
-        let zeros : Vec<usize> = std::iter::repeat(0).take(self.width).collect();
-
-        let widths : Vec<usize> = self.rows.iter()
-            .map(|row| row.iter().map(|text| text.len()))
-            .fold(zeros,|acc,row| -> Vec<usize> {
-                acc.iter().zip(row).map( |(x,y)| std::cmp::max(*x,y)).collect()
-            });
-
-        self.rows.iter()
-            .map(|row| Self::as_table_row(row,&widths))
-            .enumerate()
-            .map(|(idx,text)| {
-                if idx == 0 {
-                    text.reversed().to_string()
-                } else if (idx % 2) == 0 {
-                    text.on_bright_black().to_string()
-                } else {
-                    text
-                }
-            }).fold(String::new(),|acc,val| acc + &val + "\n" )
+    fn as_table_row(row: &[String], col_widths: &[usize]) -> String {
+        row.iter()
+            .zip(col_widths)
+            .map(|(text, width)| format!(" {text:width$} "))
+            .join("|")
     }
 
     pub fn as_csv(&self) -> String {
-
         self.rows.iter()
-            .map(|row|
-                row .iter()
-                    .map(|s| s.to_string() + ",")
-                    .fold(String::new(), |acc,val| acc + &val )
-            ).map(|s| s + "\n")
-            .fold(String::new(), |acc,val| acc + &val)
-
+            .map(|row| row.iter().join(","))
+            .join("\n")
     }
-
 }
 
+impl fmt::Display for Table {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let widths: Vec<usize> = (0..self.width)
+            .map(|i| self.rows.iter()
+                .map(|row| row[i].len())
+                .max().unwrap_or_default()
+            )
+            .collect();
 
+        for (i, row) in self.rows.iter().enumerate() {
+            let text = Self::as_table_row(row, &widths);
+            let styled = match i {
+                0 => text.reversed().to_string(),
+                i if i % 2 == 0 => text.on_bright_black().to_string(),
+                _ => text
+            };
+            writeln!(f, "{styled}")?;
+        }
+
+        Ok(())
+    }
+}

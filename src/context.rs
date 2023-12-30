@@ -1,468 +1,362 @@
 
-use std::
-{
+use std::{
     collections::HashMap,
     env::current_dir,
-    ffi::
-    {
-        OsString,
-        OsStr,
-    },
     fs,
-    os::unix::fs::{
-        PermissionsExt,
-        MetadataExt,
-    },
-    path::
-    {
-        Path,
-        PathBuf,
-    }
+    os::unix::fs::{PermissionsExt, MetadataExt},
+    path::{Path, PathBuf}, iter
 };
 
-use chrono::
-{
-    TimeZone,
-    DateTime,
-    Local,
-    Days,
-};
-
-use users::
-{
-    get_user_by_uid,
-    get_current_uid,
-};
+use chrono::{TimeZone, DateTime, Local, Days, NaiveTime};
+use users::{ get_user_by_uid, get_current_uid};
+use serde_derive::{ Serialize, Deserialize};
+use itertools::Itertools;
 
 use crate::{
-    fail_info::
-    {
-        FailInfo,
-        FailLog,
-    },
-    asgn_spec::
-    {
-        AsgnSpec,
-        AsgnSpecToml,
-        SubmissionSlot,
-    },
+    fail_info::{FailInfo, FailLog},
+    asgn_spec::{AsgnSpec, AsgnSpecToml, SubmissionSlot},
     util,
     table::Table,
     act::instructor::InstructorAct,
 };
 
+const DEFAULT_DUE_TIME: NaiveTime = NaiveTime::from_hms_opt(23, 59, 59).unwrap();
 
-use serde_derive::
-{
-    Serialize,
-    Deserialize,
-};
+#[derive(Default, Serialize, Deserialize)]
+pub struct CourseToml {
+    manifest: Vec<String>,
+    graders: Vec<String>,
+    students: Vec<String>,
+    grace_total: Option<i64>,
+    grace_limit: Option<i64>,
+}
 
-use itertools::Itertools;
-
-
-#[derive(Default,Serialize,Deserialize)]
-pub struct CourseToml
-{
-    manifest    : Vec<String>,
-    graders     : Vec<String>,
-    students    : Vec<String>,
-    grace_total : Option<i64>,
-    grace_limit : Option<i64>,
+impl From<&Context> for CourseToml {
+    fn from(ctx: &Context) -> Self {
+        Self {
+            manifest: ctx.manifest.clone(),
+            graders: ctx.graders.clone(),
+            students: ctx.students.clone(),
+            grace_total: ctx.grace_total,
+            grace_limit: ctx.grace_limit,
+        }
+    }
 }
 
 #[derive(PartialEq)]
-pub enum Role
-{
+pub enum Role {
     Instructor,
     Grader,
     Student,
     Other,
 }
 
-
-
-pub struct Context
-{
+pub struct Context {
     // Determined through input
-    pub instructor  : OsString,
-    pub base_path   : PathBuf,
-    pub exe_path    : PathBuf,
+    pub instructor: String,
+    pub base_path: PathBuf,
+    pub exe_path: PathBuf,
 
     // Determined through system calls
-    pub uid         : u32,
-    pub user        : OsString,
-    pub time        : DateTime<Local>,
-    pub cwd         : PathBuf,
+    pub uid: u32,
+    pub username: String,
+    pub time: DateTime<Local>,
+    pub cwd: PathBuf,
 
     // Determined by reading the context file
-    pub manifest     : Vec<OsString>,
-    pub graders      : Vec<OsString>,
-    pub students     : Vec<OsString>,
-    pub members      : Vec<OsString>,
-    pub grace_total  : Option<i64>,
-    pub grace_limit  : Option<i64>,
+    pub manifest: Vec<String>,
+    pub graders: Vec<String>,
+    pub students: Vec<String>,
+    pub members: Vec<String>,
+    pub grace_total: Option<i64>,
+    pub grace_limit: Option<i64>,
 
     // Determined by the context file + system calls
-    pub role        : Role,
+    pub role: Role,
 
     // Determined by trying to parse the spec of every
     // assignment in the manifest
-    pub catalog     : HashMap<OsString,Result<AsgnSpec,FailLog>>,
+    pub catalog: HashMap<String, Result<AsgnSpec, FailLog>>,
 }
 
-
-impl Context
-{
-
-    fn load(base_path: &PathBuf) -> Result<CourseToml,FailLog>
-    {
+#[allow(dead_code)]
+impl Context {
+    fn load(base_path: &Path) -> Result<CourseToml, FailLog> {
         let course_file_path = base_path.join(".info").join("course.toml");
 
-        let course_file_text = fs::read_to_string(course_file_path)
-            .map_err(|err| -> FailLog {
-                FailInfo::NoSpec(
-                    "course".to_string(),
-                    format!("{}",err)
-                ).into()
-            })?;
+        let course_file_text = fs::read_to_string(course_file_path).map_err(|err|
+            FailInfo::NoSpec("course".into(), err.to_string()).into_log()
+        )?;
 
-        toml::from_str(&course_file_text)
-            .map_err(|err| -> FailLog {
-                FailInfo::BadSpec(
-                    "course".to_string(),
-                    format!("{}",err)
-                ).into()
-            })
-    }
-
-    pub fn sync(&self) -> Result<(),FailLog>
-    {
-        use FailInfo::*;
-        let course_file_path = self.base_path.join(".info").join("course.toml");
-
-
-        let course_toml = CourseToml {
-            manifest: util::stringify_osstr_vec(&self.manifest),
-            graders:  util::stringify_osstr_vec(&self.graders),
-            students: util::stringify_osstr_vec(&self.students),
-            grace_total : self.grace_total,
-            grace_limit : self.grace_limit,
-        };
-
-        let toml_text = toml::to_string(&course_toml)
-            .map_err(|err| IOFail(format!(
-                "Could not serialize course spec : {}",
-                err
-            )).into_log())?;
-
-        util::write_file(
-            course_file_path,
-            toml_text
+        toml::from_str(&course_file_text).map_err(|err|
+            FailInfo::BadSpec("course".into(), err.to_string()).into_log()
         )
     }
 
+    pub fn sync(&self) -> Result<(), FailLog> {
+        use FailInfo::*;
+        let course_file_path = self.base_path.join(".info").join("course.toml");
 
-    pub fn populate_catalog(&mut self)
-    {
-        for asgn_name in self.manifest.iter() {
-            let spec_path = self.base_path
-                .join(asgn_name);
+        let course_toml = CourseToml::from(self);
+
+        let toml_text = toml::to_string(&course_toml).map_err(|err|
+            IOFail(format!("Could not serialize course spec: {}", err)).into_log()
+        )?;
+
+        util::write_file(course_file_path, toml_text)
+    }
+
+    pub fn populate_catalog(&mut self) {
+        for asgn_name in &self.manifest {
+            let spec_path = self.base_path.join(asgn_name);
             self.catalog.insert(asgn_name.clone(), AsgnSpec::load(spec_path));
         }
     }
 
-    pub fn deduce(base_path: OsString) -> Result<Self,FailLog>
-    {
-        let base_path : PathBuf = base_path.into();
-        let base_path = base_path.canonicalize().unwrap();
+    pub fn catalog_get<'a>(&'a self, asgn_name: &str) -> Result<&'a AsgnSpec, FailLog> {
+        self.catalog.get(asgn_name)
+            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()))?
+            .as_ref()
+            .map_err(Clone::clone)
+    }
 
-        let uid  : u32      = get_current_uid();
-        let user : OsString = get_user_by_uid(uid)
-                .ok_or(FailInfo::InvalidUID() )?.name().into();
+    pub fn catalog_get_mut<'a>(&'a mut self, asgn_name: &str) -> Result<&'a mut AsgnSpec, FailLog> {
+        self.catalog.get_mut(asgn_name)
+            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()))?
+            .as_mut()
+            .map_err(|err| err.clone())
+    }
 
-        let cwd = current_dir()
-                .map_err(|_| FailInfo::InvalidCWD() )?;
+    pub fn deduce(base_path: impl AsRef<Path>) -> Result<Self, FailLog> {
+        let base_path = base_path.as_ref().canonicalize().unwrap();
+
+        let uid = get_current_uid();
+        let username = get_user_by_uid(uid)
+            .ok_or(FailInfo::InvalidUID(uid))?
+            .name().to_str().unwrap()
+            .to_owned();
+
+        let cwd = current_dir().map_err(|_| FailInfo::InvalidCWD())?;
 
         let exe_path = std::fs::read_link("/proc/self/exe")
-            .map_err(|err| -> FailLog {FailInfo::IOFail(err.to_string()).into()})?;
+            .map_err(|err| FailInfo::IOFail(err.to_string()).into_log())?;
 
-        if ! base_path.is_dir() {
+        if !base_path.is_dir() {
             return Err(FailInfo::NoBaseDir(base_path).into());
         }
 
         let instructor_uid = std::fs::metadata(&base_path)
-            .map_err(|err| FailInfo::IOFail(format!("{}",err)))?.uid();
-        let instructor : OsString = get_user_by_uid(instructor_uid)
-                .ok_or(FailInfo::InvalidUID() )?.name().into();
+            .map_err(|err| FailInfo::IOFail(err.to_string()))?
+            .uid();
+
+        let instructor = get_user_by_uid(instructor_uid)
+                .ok_or(FailInfo::InvalidUID(uid))?
+                .name().to_str().unwrap().to_owned();
 
         let time = Local::now();
 
-        let spec = Self::load(&base_path)?;
-        let manifest : Vec<OsString> = spec.manifest.into_iter().map(OsString::from).collect();
-        let graders  : Vec<OsString> = spec.graders .into_iter().map(OsString::from).collect();
-        let students : Vec<OsString> = spec.students.into_iter().map(OsString::from).collect();
-        let grace_total = spec.grace_total;
-        let grace_limit = spec.grace_limit;
+        let toml = Self::load(&base_path)?;
+        let grace_total = toml.grace_total;
+        let grace_limit = toml.grace_limit;
 
-        let mut role = Role::Other;
+        let role =
+            if toml.students.contains(&username) { Role::Student }
+            else if toml.graders.contains(&username) { Role::Grader }
+            else if username == instructor { Role::Instructor }
+            else { Role::Other };
 
-        if students.iter().any(|s| *s == user ) {
-            role = Role::Student;
-        }
-
-        if graders.iter().any(|g| *g == user) {
-            role = Role::Grader;
-        }
-
-        if user == instructor {
-            role = Role::Instructor;
-        }
-
-        let mut members = vec![instructor.clone()];
-        members.extend(graders.clone());
-        members.extend(students.clone());
+        let members = iter::once(instructor.clone())
+            .chain(toml.graders.iter().cloned())
+            .chain(toml.students.iter().cloned())
+            .collect();
 
         let mut context = Self {
             instructor,
             base_path,
             exe_path,
             uid,
-            user,
+            username,
             time,
             cwd,
-            manifest,
-            graders,
-            students,
+            manifest: toml.manifest,
+            graders: toml.graders,
+            students: toml.students,
             members,
             grace_total,
             grace_limit,
             role,
-            catalog : Default::default(),
+            catalog: Default::default(),
         };
 
         context.populate_catalog();
         Ok(context)
     }
 
-
-    pub fn print_manifest(&self)
-    {
-        for name in self.manifest.iter()
-        {
-            println!("{}",name.to_string_lossy());
+    pub fn print_manifest(&self) {
+        for name in &self.manifest {
+            println!("{name}");
         }
     }
 
-    pub fn print_failures(&self)
-    {
-        let mut log : FailLog = Default::default();
-        for sub_log in self.manifest.iter()
+    pub fn collect_failures(&self) -> FailLog {
+        self.manifest.iter()
             .flat_map(|name| self.catalog[name].as_ref().err())
-        {
-            log.extend((*sub_log).clone());
-        }
-        print!("{}",log);
-
+            .cloned()
+            .flatten()
+            .collect::<FailLog>()
     }
 
-
-    pub fn get_spec<'a> (manifest : &'a Vec<AsgnSpec>, name: &OsStr) -> Option<&'a AsgnSpec>
-    {
-        for entry in manifest.iter() {
-            if OsString::from(&entry.name) == name {
-                return Some(entry);
-            }
-        }
-        None
+    pub fn announce(&self) {
+        println!("The time is: {}", self.time);
+        println!("The username is: {}", self.username);
+        println!("Called from directory {}", self.cwd.display());
     }
 
-
-    pub fn announce(&self)
-    {
-        println!("The time is : {}",self.time);
-        println!("The user is : {}",self.user.to_string_lossy());
-        println!("Called from directory {}",self.cwd.display());
-    }
-
-
-
-    fn make_dir_public<P: AsRef<Path>, L : AsRef<str>>(path: P, label: L) -> Result<(),FailLog>
-    {
+    fn make_dir_public<P: AsRef<Path>, L : AsRef<str>>(path: P, label: L) -> Result<(), FailLog> {
+        let label = label.as_ref();
         let mut perm = fs::metadata(path.as_ref())
-            .map_err(|err| -> FailLog {
-                FailInfo::IOFail(format!("chmoding {} : {}",label.as_ref(),err)).into()
-            })?.permissions();
+            .map_err(|err| FailInfo::IOFail(format!("Failed chmoding {label}: {err}")).into_log())?
+            .permissions();
 
         perm.set_mode(0o755);
         Ok(())
     }
 
-    pub fn grader_facl(&self,student : Option<&OsString>) -> Result<Vec<util::FaclEntry>,FailLog>
-    {
-        let mut facl_list : Vec<util::FaclEntry> = Vec::new();
-        let inst_entry = util::FaclEntry {
-            user  : self.instructor.clone(),
-            read  : true,
-            write : true,
-            exe   : true,
-        };
+    pub fn grader_facl(&self, student: Option<&str>) -> Result<Vec<util::FaclEntry>, FailLog> {
+        let mut facl_list: Vec<util::FaclEntry> = Vec::new();
 
-        facl_list.push(inst_entry);
+        facl_list.push(util::FaclEntry {
+            username: self.instructor.clone(),
+            read: true,
+            write: true,
+            exe: true,
+        });
 
-        if let Some(student_name) = student {
-            let student_entry = util::FaclEntry {
-                user  : student_name.clone(),
-                read  : true,
-                write : true,
-                exe   : true,
-            };
-
-            facl_list.push(student_entry);
+        if let Some(student) = student {
+            facl_list.push(util::FaclEntry {
+                username: student.to_owned(),
+                read: true,
+                write: true,
+                exe: true,
+            });
         }
 
-        for grad in self.graders.iter () {
-            let is_instructor = grad == &self.instructor;
-            let is_student   = student.map(|name| name == grad).unwrap_or(false);
-            if is_student || is_instructor {
-                continue;
-            }
-            let grad_entry = util::FaclEntry {
-                user  : grad.clone(),
-                read  : true,
-                write : false,
-                exe   : true,
-            };
-            facl_list.push(grad_entry);
-        }
+        let graders_exclusive = self.graders.iter()
+            .filter(|&grader| Some(grader.as_str()) != student && grader != &self.instructor)
+            .map(|grader| util::FaclEntry {
+                username: grader.to_owned(),
+                read: true,
+                write: false,
+                exe: true,
+            });
+
+        facl_list.extend(graders_exclusive);
+
         Ok(facl_list)
     }
 
-
-    fn refresh_root(&self) -> Result<(),FailLog>
-    {
-        util::refresh_dir(&self.base_path,0o755,Vec::new().iter())?;
+    fn refresh_root(&self) -> Result<(), FailLog> {
+        util::refresh_dir(&self.base_path, 0o755, iter::empty())?;
 
         let course_info_path = self.base_path.join(".info");
-        util::refresh_dir(&course_info_path,0o755,Vec::new().iter())?;
-
         let course_file_path = course_info_path.join("course.toml");
-        let course_toml : CourseToml = Default::default();
-        let course_text = toml::to_string(&course_toml).unwrap();
-        util::refresh_file(&course_file_path,0o644,course_text)?;
+        let course_text = toml::to_string(&CourseToml::default()).unwrap();
 
-        let empty = Vec::new();
-        let grade = self.grader_facl(None)?;
+        util::refresh_dir(&course_info_path, 0o755, iter::empty())?;
+        util::refresh_file(course_file_path, 0o644, &course_text)?;
+
         let dirs = [
-            ("public",0o755,empty.iter()),
-            ("private",0o700,grade.iter())
+            ("public",  0o755, Vec::new()),
+            ("private", 0o700, self.grader_facl(None)?),
         ];
 
-        for (name,flags,facl) in dirs.iter() {
+        for (name, flags, facl) in dirs {
             let path = course_info_path.join(name);
-            util::recursive_refresh_dir(&path,*flags,facl.clone())?;
+            util::recursive_refresh_dir(&path, flags, facl.iter())?;
         }
+
         Ok(())
     }
 
-
-    pub fn refresh_assignment(&self, asgn: &OsStr) -> Result<(),FailLog>
-    {
-        let asgn_path = self.base_path.join(asgn);
-        util::refresh_dir(&asgn_path,0o755,Vec::new().iter())?;
+    pub fn refresh_assignment(&self, asgn_name: &str) -> Result<(), FailLog> {
+        let asgn_path = self.base_path.join(asgn_name);
+        util::refresh_dir(&asgn_path, 0o755, iter::empty())?;
 
         let asgn_spec_path = asgn_path.join(".info");
-        util::refresh_dir(&asgn_spec_path,0o755,Vec::new().iter())?;
+        util::refresh_dir(&asgn_spec_path, 0o755, iter::empty())?;
 
         let asgn_info_path = asgn_spec_path.join("info.toml");
-        let asgn_toml = AsgnSpecToml::default_with_name(asgn);
-        let asgn_text = toml::to_string(&asgn_toml).unwrap();
-        util::refresh_file(&asgn_info_path,0o644,asgn_text)?;
+        let asgn_text = toml::to_string(&AsgnSpecToml::default_with_name(asgn_name.to_owned())).unwrap();
+        util::refresh_file(asgn_info_path, 0o644, &asgn_text)?;
 
         let asgn_make_path = asgn_spec_path.join("Makefile");
-        util::refresh_file(&asgn_make_path,0o644,String::new())?;
+        util::refresh_file(asgn_make_path, 0o644, "")?;
 
         let asgn_make_path = asgn_spec_path.join("score.toml");
-        util::refresh_file(&asgn_make_path,0o644,String::new())?;
+        util::refresh_file(asgn_make_path, 0o644, "")?;
 
-        let empty = Vec::new();
-        let grade = self.grader_facl(None)?;
         let dirs = [
-            ("public", 0o755,empty.iter()),
-            ("private",0o700,grade.iter()),
+            ("public", 0o755, Vec::new()),
+            ("private", 0o700, self.grader_facl(None)?),
         ];
 
-        for (name,flags,facl) in dirs.iter() {
+        for (name, flags, facl) in dirs {
             let path = asgn_spec_path.join(name);
-            util::recursive_refresh_dir(&path,*flags,facl.clone())?;
+            util::recursive_refresh_dir(&path, flags, facl.iter())?;
         }
 
         let internal_path = asgn_spec_path.join(".internal");
-        util::recursive_refresh_dir(&internal_path,0o700,empty.iter())?;
         let score_build_path = internal_path.join("score_build");
-        util::recursive_refresh_dir(&score_build_path,0o700,empty.iter())?;
+        util::recursive_refresh_dir(internal_path, 0o700, iter::empty())?;
+        util::recursive_refresh_dir(score_build_path, 0o700, iter::empty())?;
 
+        let asgn_path = self.base_path.join(asgn_name);
 
-        let asgn_path = self.base_path.join(asgn);
-
-        for member in self.members.iter() {
+        for member in &self.members {
             let asgn_sub_path = asgn_path.join(member);
+            let facl_list = self.grader_facl(Some(member))?;
 
-            let facl_list = self.grader_facl(Some(&member))?;
-
-            util::refresh_dir(asgn_sub_path.clone(),0o700,facl_list.iter())?;
+            util::refresh_dir(asgn_sub_path.clone(), 0o700, facl_list.iter())?;
 
             let extension_path = asgn_sub_path.join(".extension");
-            util::refresh_file(extension_path,0o700,"value = 0".to_string())?;
-
+            util::refresh_file(extension_path, 0o700, "value = 0")?;
         }
 
         Ok(())
     }
 
-
-
-
-    pub fn refresh(&self) -> Result<(),FailLog>
-    {
-
+    pub fn refresh(&self) -> Result<(), FailLog> {
         self.refresh_root()?;
 
-        for asgn in self.manifest.iter() {
+        for asgn in &self.manifest {
             self.refresh_assignment(asgn)?;
         }
 
         Ok(())
-
     }
 
-
-    pub fn get_slot<'a>(&'a self, asgn: &'a AsgnSpec, user: &OsString) -> SubmissionSlot<'a> {
-        let sub_dir = self.base_path.join(&asgn.name).join(user);
-
+    pub fn get_slot<'a>(&'a self, asgn: &'a AsgnSpec, username: &str) -> SubmissionSlot<'a> {
         SubmissionSlot {
-            context:   &self,
+            context: self,
             asgn_spec: asgn,
-            base_path: sub_dir,
+            base_path: self.base_path.join(&asgn.name).join(username),
         }
     }
 
-    fn offset_date(date : Option<&DateTime<Local>>, offset : i64 ) -> Result<Option<DateTime<Local>>,FailLog>
-    {
+    fn offset_date(date: Option<&DateTime<Local>>, offset: i64) -> Result<Option<DateTime<Local>>, FailLog> {
         if let Some(date) = date.as_ref() {
-            //println!("??? {}",date);
-            //println!("!!! {}",date.checked_add_days(Days::new(offset as u64)).unwrap());
             let offset_date = if offset >= 0 {
                 date.naive_local()
                     .checked_add_days(Days::new(offset as u64))
-                    .ok_or(FailInfo::IOFail(format!("Extended date out of valid range.")))?
+                    .ok_or(FailInfo::IOFail("Extended date out of valid range.".to_owned()))?
             } else {
                 date.naive_local()
                     .checked_sub_days(Days::new(-offset as u64))
-                    .ok_or(FailInfo::IOFail(format!("Extended date out of valid range.")))?
+                    .ok_or(FailInfo::IOFail("Extended date out of valid range.".to_owned()))?
             };
             let offset_date = Local.from_local_datetime(&offset_date).single()
-                .ok_or(FailInfo::IOFail(format!("Extended date out of valid range.")))?;
+                .ok_or(FailInfo::IOFail("Extended date out of valid range.".to_owned()))?;
+
             Ok(Some(offset_date))
         } else {
             Ok(None)
@@ -470,45 +364,25 @@ impl Context
     }
 
     pub fn assignment_summary_row(&self, asgn: &AsgnSpec) -> Vec<String> {
+        let active  = if asgn.active  { "YES" } else { "NO" };
+        let visible = if asgn.visible { "YES" } else { "NO" };
 
-        let active  = if asgn.active  {"YES"} else {"NO"};
-        let visible = if asgn.visible {"YES"} else {"NO"};
+        let status =
+            if !asgn.active { "DISABLED" }
+            else if asgn.before_open() { "BEFORE OPEN" }
+            else if asgn.after_close() { "AFTER CLOSE" }
+            else { "ENABLED" };
 
-        let status = if !asgn.active {
-            "DISABLED"
-        } else if asgn.before_open() {
-            "BEFORE OPEN"
-        } else if asgn.after_close() {
-            "AFTER CLOSE"
-        } else {
-            "ENABLED"
-        };
-
-        let due_date  = asgn.due_date;
-        let time_string = if let Some(time) = due_date {
-            let time_string = time.time().to_string();
-            if time_string == "23:59:59" {
-                String::from("")
-            } else {
-                String::from(" ") + &time_string
-            }
-        } else {
-            String::from("")
-        };
-        let naive_due_date  = due_date.map(|date| {
-                date.date_naive().to_string() + &time_string
-            }).unwrap_or(String::from("NONE"));
-
-
-        let file_list : String = asgn.file_list.iter()
-            .enumerate()
-            .fold(String::new(),|acc,(idx,text)| {
-                if idx == 0 {
-                    text.to_string_lossy().to_string()
-                } else {
-                    format!("{}  {}",acc,text.to_string_lossy().to_string())
+        let naive_due_date = match asgn.due_date {
+            None => "NONE".to_owned(),
+            Some(due) => {
+                let date = due.date_naive();
+                match due.time() {
+                    DEFAULT_DUE_TIME => date.to_string(),
+                    time => format!("{date} {time}"),
                 }
-            });
+            }
+        };
 
         vec![
             asgn.name.clone(),
@@ -516,212 +390,177 @@ impl Context
             active.to_string(),
             visible.to_string(),
             naive_due_date,
-            file_list,
+            asgn.file_list.iter().join("  "),
         ]
     }
 
-    pub fn submission_summary_row(&self, asgn: &AsgnSpec, user: &OsString) -> Vec<String> {
-
-        let slot = self.get_slot(asgn,user);
-        let status = slot.status().unwrap();
+    pub fn submission_summary_row(&self, asgn: &AsgnSpec, username: &str) -> Vec<String> {
+        let status = self.get_slot(asgn, username).status().unwrap();
         let lateness = status.versus(asgn.due_date.as_ref());
 
         let extension = status.extension_days;
-        let grace     = status.grace_days;
+        let grace = status.grace_days;
 
         vec![
             asgn.name.clone(),
-            user.to_string_lossy().to_string(),
-            lateness.to_string(),
+            username.to_owned(),
+            lateness,
             extension.to_string(),
-            grace.to_string()
+            grace.to_string(),
         ]
     }
 
-    pub fn normal_summary_row(&self, asgn: &AsgnSpec, user: &OsString) -> Result<Vec<String>,FailLog> {
-        let sub_dir = self.base_path.join(&asgn.name).join(user);
+    pub fn normal_summary_row(&self, asgn: &AsgnSpec, username: &str) -> Result<Vec<String>, FailLog> {
+        let sub_dir = self.base_path.join(&asgn.name).join(username);
 
         let slot = SubmissionSlot {
-            context:   &self,
+            context: self,
             asgn_spec: asgn,
             base_path: sub_dir,
         };
 
         let status = slot.status().unwrap();
-        let due_date  = asgn.due_date;
+        let due_date = asgn.due_date;
         let extension = status.extension_days;
-        let grace     = status.grace_days;
+        let grace = status.grace_days;
         let bump = extension+grace;
 
-        let ext_due_date = Self::offset_date(asgn.due_date.as_ref(),bump)?;
-        //if let Some(time) = ext_due_date {
-        //    println!(">>> {} + {} -> {}",asgn.due_date.as_ref().unwrap(),bump,time);
-        //}
+        let ext_due_date = Self::offset_date(asgn.due_date.as_ref(), bump)?;
         let lateness = status.versus(ext_due_date.as_ref());
 
-        let bump : String = if bump != 0 {format!(" {:+}",bump)} else { String::new() };
-        let active = if !asgn.active {
-            "DISABLED"
-        } else if asgn.before_open() {
-            "BEFORE OPEN"
-        } else if asgn.after_close() {
-            "AFTER CLOSE"
-        } else {
-            "ENABLED"
-        };
+        let active =
+            if !asgn.active { "DISABLED" }
+            else if asgn.before_open() { "BEFORE OPEN" }
+            else if asgn.after_close() { "AFTER CLOSE" }
+            else { "ENABLED" };
 
-        let file_list : String = asgn.file_list.iter()
-            .enumerate()
-            .fold(String::new(),|acc,(idx,text)| {
-                if idx == 0 {
-                    text.to_string_lossy().to_string()
-                } else {
-                    format!("{}  {}",acc,text.to_string_lossy().to_string())
+
+        let naive_due_date = match due_date {
+            None => "NONE".to_owned(),
+            Some(due) => {
+                let date = due.date_naive();
+                match due.time() {
+                    DEFAULT_DUE_TIME => due.to_string(),
+                    time => format!("{date} {time}"),
                 }
-            });
-
-        let time_string = if let Some(time) = due_date {
-            let time_string = time.time().to_string();
-            if time_string == "23:59:59" {
-                String::from("")
-            } else {
-                String::from(" ") + &time_string
             }
-        } else {
-            String::from("")
         };
-
-
-        let naive_due_date  = due_date.map(|date| {
-                date.date_naive().to_string() + &bump + &time_string
-            }).unwrap_or(String::from("NONE"));
 
         Ok(vec![
             asgn.name.clone(),
-            active.to_string(),
+            active.to_owned(),
             naive_due_date,
-            lateness.to_string(),
-            file_list.to_string()
+            lateness,
+            asgn.file_list.iter().join("  ")
         ])
     }
 
-
-    pub fn list_subs(&self, asgn: Option<&OsString>, user: Option<&OsString>)
-     -> Result<(),FailLog>
-    {
-        let header : Vec<String> = ["ASSIGNMENT","USER", "SUBMISSION STATUS", "EXTENSION", "GRACE"]
+    pub fn list_subs(&self, asgn: Option<&str>, username: Option<&str>) -> Result<(), FailLog> {
+        let header: Vec<String> = ["ASSIGNMENT", "USER", "SUBMISSION STATUS", "EXTENSION", "GRACE"]
             .iter().map(|s| s.to_string()).collect();
 
         let mut table = Table::new(header.len());
         table.add_row(header)?;
 
-
-        let asgn_list : Vec<&OsString> = if let Some(asgn_name) = asgn {
-            if ! self.manifest.contains(asgn_name) {
-                return Err(FailInfo::InvalidAsgn(asgn_name.clone()).into_log())
+        let asgn_names: Vec<_> = match asgn {
+            Some(asgn_name) => {
+                if !self.manifest.iter().any(|asgn| asgn == asgn_name) {
+                    return Err(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log())
+                }
+                vec![asgn_name]
             }
-            vec![asgn_name]
-        } else {
-            self.manifest.iter().collect()
+            None => self.manifest.iter().map(String::as_str).collect(),
         };
 
-        let user_list : Vec<&OsString> = if let Some(user_name) = user {
-            if ! self.members.contains(user_name) {
-                return Err(FailInfo::InvalidUser(user_name.clone()).into_log())
+        let usernames: Vec<_> = match username {
+            Some(username) => {
+                if !self.members.iter().any(|member| member == username) {
+                    return Err(FailInfo::InvalidUser(username.to_owned()).into_log())
+                }
+                vec![username]
             }
-            vec![user_name]
-        } else {
-            self.members.iter().collect()
+            None => self.members.iter().map(String::as_str).collect(),
         };
 
-        let body : Vec<Vec<String>> = asgn_list.iter()
-            .filter_map(|name| self.catalog.get(name.clone()) )
-            .filter_map(|asgn| asgn.as_ref().ok() )
-            .cartesian_product(user_list.iter())
-            .map(|(asgn,user)| {
-                self.submission_summary_row(asgn, user)
-            }).collect();
+        let body: Vec<Vec<String>> = asgn_names.iter()
+            .filter_map(|&asgn_name| self.catalog.get(asgn_name) )
+            .filter_map(|asgn| asgn.as_ref().ok())
+            .cartesian_product(usernames.iter())
+            .map(|(asgn, username)| self.submission_summary_row(asgn, username))
+            .collect();
 
-        for row in body.into_iter() {
+        for row in body {
             table.add_row(row)?;
         }
 
-        print!("{}",table.as_table());
+        print!("{table}");
 
         Ok(())
     }
 
-    pub fn list_asgns(&self)
-     -> Result<(),FailLog>
-    {
-        let header : Vec<String> = ["NAME", "STATUS", "ACTIVE", "VISIBLE", "DUE", "FILES"]
-            .iter().map(|s| s.to_string()).collect();
+    pub fn list_asgns(&self) -> Result<(), FailLog> {
+        let header: Vec<String> = ["NAME", "STATUS", "ACTIVE", "VISIBLE", "DUE", "FILES"].into_iter()
+            .map(str::to_owned)
+            .collect();
 
         let mut table = Table::new(header.len());
         table.add_row(header)?;
 
 
-        let body : Vec<Vec<String>> = self.manifest.iter()
+        let body = self.manifest.iter()
             .filter_map(|name| self.catalog.get(name) )
             .filter_map(|asgn| asgn.as_ref().ok() )
-            .map(|asgn| {
-                self.assignment_summary_row(asgn)
-            }).collect();
+            .map(|asgn| self.assignment_summary_row(asgn));
 
-        for row in body.into_iter() {
+        for row in body {
             table.add_row(row)?;
         }
 
-        print!("{}",table.as_table());
+        print!("{table}");
 
         Ok(())
     }
 
-    pub fn summary(&self) -> Result<(),FailLog>
-    {
-
-        let header : Vec<String> = ["ASSIGNMENT", "STATUS", "DUE DATE", "SUBMISSION STATUS", "FILES"]
-                .iter().map(|s| s.to_string()).collect();
+    pub fn summary(&self) -> Result<(), FailLog> {
+        let header = ["ASSIGNMENT", "STATUS", "DUE DATE", "SUBMISSION STATUS", "FILES"].map(str::to_owned);
 
         let mut table = Table::new(header.len());
         table.add_row(header)?;
 
-        let body : Vec<Vec<String>> = self.manifest.iter()
+        let body = self.manifest.iter()
             .filter_map(|name| self.catalog.get(name) )
             .filter_map(|asgn| asgn.as_ref().ok() )
             .filter(|asgn| asgn.visible)
-            .map(|asgn| self.normal_summary_row(asgn,&self.user))
-            .filter_map(|row| row.ok())
-            .collect();
+            .map(|asgn| self.normal_summary_row(asgn, &self.username))
+            .filter_map(|row| row.ok());
 
-        for row in body.into_iter() {
+        for row in body {
             table.add_row(row)?;
         }
 
-        if self.grace_total.unwrap_or(0) != 0 {
-            print!("TOTAL GRACE: {}    ",self.grace_total.unwrap());
-            print!("GRACE LIMIT: {}    ",self.grace_limit
+        if self.grace_total.unwrap_or_default() != 0 {
+            print!("TOTAL GRACE: {}    ", self.grace_total.unwrap_or_default());
+            print!("GRACE LIMIT: {}    ", self.grace_limit
                 .map(|limit| limit.to_string())
-                .unwrap_or("NONE".to_string())
+                .unwrap_or("NONE".to_owned())
             );
-            print!("GRACE SPENT: {}\n",self.grace_spent());
+            println!("GRACE SPENT: {}", self.grace_spent());
         }
 
-        print!("{}",table.as_table());
+        print!("{table}");
 
         Ok(())
     }
-
 
     pub fn grace_spent(&self) -> i64 {
         self.manifest.iter()
             .filter_map(|name| self.catalog.get(&name.clone()) )
             .filter_map(|asgn| asgn.as_ref().ok() )
             .map(|asgn|{
-                let sub_dir = self.base_path.join(&asgn.name).join(&self.user);
+                let sub_dir = self.base_path.join(&asgn.name).join(&self.username);
 
                 let slot = SubmissionSlot {
-                    context:   &self,
+                    context: self,
                     asgn_spec: asgn,
                     base_path: sub_dir,
                 };
@@ -730,30 +569,28 @@ impl Context
 
                 status.grace_days
             })
-            .fold(0,|acc,val| acc + val)
-
+            .sum()
     }
-
-
 }
 
+pub fn init(base_path: impl AsRef<Path>) -> Result<(), FailLog> {
+    let base_path = base_path.as_ref();
 
-
-pub fn init(base_path : &Path) -> Result<(),FailLog> {
-    if base_path.exists() {
-        util::refresh_dir(&base_path,0o755,Vec::new().iter())?;
-        let info_path = base_path.join(".info");
-        util::refresh_dir(&info_path,0o755,Vec::new().iter())?;
-        let toml_path = info_path.join("course.toml");
-        util::refresh_file(&toml_path,0o755,toml::to_string(&CourseToml::default()).unwrap())?;
-        let mut context = Context::deduce(OsString::from(base_path))?;
-        InstructorAct::Refresh{}.execute(&mut context)
-    } else {
-        Err(FailInfo::Custom(
-            "Course directory path does not exist.".to_string(),
-            "Ensure that the provided path corresponds to an existing directory.".to_string(),
+    if !base_path.exists() {
+        return Err(FailInfo::Custom(
+            "Course directory path does not exist.".to_owned(),
+            "Ensure that the provided path corresponds to an existing directory.".to_owned(),
         ).into_log())
     }
+
+    util::refresh_dir(base_path, 0o755, iter::empty())?;
+
+    let info_path = base_path.join(".info");
+    util::refresh_dir(&info_path, 0o755, iter::empty())?;
+
+    let toml_path = info_path.join("course.toml");
+    util::refresh_file(toml_path, 0o755, &toml::to_string(&CourseToml::default()).unwrap())?;
+
+    let mut context = Context::deduce(base_path)?;
+    InstructorAct::Refresh{}.execute(&mut context)
 }
-
-
