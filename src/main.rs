@@ -3,12 +3,12 @@
 pub mod act;
 pub mod asgn_spec;
 pub mod context;
-pub mod fail_info;
+pub mod error;
 pub mod util;
 pub mod table;
 
 use structopt::StructOpt;
-use fail_info::FailInfo;
+use error::Error;
 use context::{Context, Role};
 use colored::Colorize;
 
@@ -29,7 +29,7 @@ fn main() {
         match ctx_try {
             Ok(ctx) => {
                 if command == Some("init") {
-                    print!("{}", FailInfo::Custom(
+                    print!("{}", Error::Custom(
                         "Provided path is already the base path of a pre-existing, valid course directory.".to_owned(),
                         "Either clear out that directory, or use a different one.".to_owned()
                     ));
@@ -61,9 +61,10 @@ fn main() {
         print!("{log}");
     }
 
-    if let Role::Instructor = &context.role {
-        if args.peek().map(String::as_str) != Some("refresh") {
-            print!("{}", context.collect_failures());
-        }
+    if
+        context.role == Role::Instructor
+        && args.peek().map(String::as_str) != Some("refresh")
+    {
+        print!("{}", context.all_catalog_errors());
     }
 }

@@ -13,7 +13,7 @@ use serde_derive::{ Serialize, Deserialize};
 use itertools::Itertools;
 
 use crate::{
-    fail_info::{FailInfo, FailLog},
+    error::{Error, ErrorLog},
     asgn_spec::{AsgnSpec, AsgnSpecToml, SubmissionSlot},
     util,
     table::Table,
@@ -76,31 +76,31 @@ pub struct Context {
 
     // Determined by trying to parse the spec of every
     // assignment in the manifest
-    pub catalog: HashMap<String, Result<AsgnSpec, FailLog>>,
+    pub catalog: HashMap<String, Result<AsgnSpec, Error>>,
 }
 
 #[allow(dead_code)]
 impl Context {
-    fn load(base_path: &Path) -> Result<CourseToml, FailLog> {
+    fn load(base_path: &Path) -> Result<CourseToml, Error> {
         let course_file_path = base_path.join(".info").join("course.toml");
 
         let course_file_text = fs::read_to_string(course_file_path).map_err(|err|
-            FailInfo::NoSpec("course".into(), err.to_string()).into_log()
+            Error::NoSpec("course".into(), err.to_string())
         )?;
 
         toml::from_str(&course_file_text).map_err(|err|
-            FailInfo::BadSpec("course".into(), err.to_string()).into_log()
+            Error::BadSpec("course".into(), err.to_string())
         )
     }
 
-    pub fn sync(&self) -> Result<(), FailLog> {
-        use FailInfo::*;
+    pub fn sync(&self) -> Result<(), Error> {
+        use Error::*;
         let course_file_path = self.base_path.join(".info").join("course.toml");
 
         let course_toml = CourseToml::from(self);
 
         let toml_text = toml::to_string(&course_toml).map_err(|err|
-            IOFail(format!("Could not serialize course spec: {}", err)).into_log()
+            IOFail(format!("Could not serialize course spec: {}", err))
         )?;
 
         util::write_file(course_file_path, toml_text)
@@ -113,44 +113,45 @@ impl Context {
         }
     }
 
-    pub fn catalog_get<'a>(&'a self, asgn_name: &str) -> Result<&'a AsgnSpec, FailLog> {
+    pub fn catalog_get<'a>(&'a self, asgn_name: &str) -> Result<&'a AsgnSpec, Error> {
         self.catalog.get(asgn_name)
-            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()))?
+            .ok_or(Error::InvalidAsgn(asgn_name.to_owned()))?
             .as_ref()
             .map_err(Clone::clone)
     }
 
-    pub fn catalog_get_mut<'a>(&'a mut self, asgn_name: &str) -> Result<&'a mut AsgnSpec, FailLog> {
+    pub fn catalog_get_mut<'a>(&'a mut self, asgn_name: &str) -> Result<&'a mut AsgnSpec, Error> {
         self.catalog.get_mut(asgn_name)
-            .ok_or(FailInfo::InvalidAsgn(asgn_name.to_owned()))?
+            .ok_or(Error::InvalidAsgn(asgn_name.to_owned()))?
             .as_mut()
             .map_err(|err| err.clone())
     }
 
-    pub fn deduce(base_path: impl AsRef<Path>) -> Result<Self, FailLog> {
+    pub fn deduce(base_path: impl AsRef<Path>) -> Result<Self, Error> {
         let base_path = base_path.as_ref().canonicalize().unwrap();
 
         let uid = get_current_uid();
         let username = get_user_by_uid(uid)
-            .ok_or(FailInfo::InvalidUID(uid))?
+            .ok_or(Error::InvalidUID(uid))?
             .name().to_str().unwrap()
             .to_owned();
 
-        let cwd = current_dir().map_err(|_| FailInfo::InvalidCWD())?;
+        let cwd = current_dir().map_err(|_| Error::InvalidCWD())?;
 
-        let exe_path = std::fs::read_link("/proc/self/exe")
-            .map_err(|err| FailInfo::IOFail(err.to_string()).into_log())?;
+        let exe_path = std::fs::read_link("/proc/self/exe").map_err(|err|
+            Error::IOFail(err.to_string())
+        )?;
 
         if !base_path.is_dir() {
-            return Err(FailInfo::NoBaseDir(base_path).into());
+            return Err(Error::NoBaseDir(base_path));
         }
 
         let instructor_uid = std::fs::metadata(&base_path)
-            .map_err(|err| FailInfo::IOFail(err.to_string()))?
+            .map_err(|err| Error::IOFail(err.to_string()))?
             .uid();
 
         let instructor = get_user_by_uid(instructor_uid)
-                .ok_or(FailInfo::InvalidUID(uid))?
+                .ok_or(Error::InvalidUID(uid))?
                 .name().to_str().unwrap().to_owned();
 
         let time = Local::now();
@@ -198,12 +199,11 @@ impl Context {
         }
     }
 
-    pub fn collect_failures(&self) -> FailLog {
+    pub fn all_catalog_errors(&self) -> ErrorLog {
         self.manifest.iter()
             .flat_map(|name| self.catalog[name].as_ref().err())
             .cloned()
-            .flatten()
-            .collect::<FailLog>()
+            .collect::<ErrorLog>()
     }
 
     pub fn announce(&self) {
@@ -212,17 +212,17 @@ impl Context {
         println!("Called from directory {}", self.cwd.display());
     }
 
-    fn make_dir_public<P: AsRef<Path>, L : AsRef<str>>(path: P, label: L) -> Result<(), FailLog> {
+    fn make_dir_public<P: AsRef<Path>, L : AsRef<str>>(path: P, label: L) -> Result<(), Error> {
         let label = label.as_ref();
         let mut perm = fs::metadata(path.as_ref())
-            .map_err(|err| FailInfo::IOFail(format!("Failed chmoding {label}: {err}")).into_log())?
+            .map_err(|err| Error::IOFail(format!("Failed chmoding {label}: {err}")))?
             .permissions();
 
         perm.set_mode(0o755);
         Ok(())
     }
 
-    pub fn grader_facl(&self, student: Option<&str>) -> Result<Vec<util::FaclEntry>, FailLog> {
+    pub fn grader_facl(&self, student: Option<&str>) -> Result<Vec<util::FaclEntry>, Error> {
         let mut facl_list: Vec<util::FaclEntry> = Vec::new();
 
         facl_list.push(util::FaclEntry {
@@ -255,7 +255,7 @@ impl Context {
         Ok(facl_list)
     }
 
-    fn refresh_root(&self) -> Result<(), FailLog> {
+    fn refresh_root(&self) -> Result<(), Error> {
         util::refresh_dir(&self.base_path, 0o755, iter::empty())?;
 
         let course_info_path = self.base_path.join(".info");
@@ -278,7 +278,7 @@ impl Context {
         Ok(())
     }
 
-    pub fn refresh_assignment(&self, asgn_name: &str) -> Result<(), FailLog> {
+    pub fn refresh_assignment(&self, asgn_name: &str) -> Result<(), Error> {
         let asgn_path = self.base_path.join(asgn_name);
         util::refresh_dir(&asgn_path, 0o755, iter::empty())?;
 
@@ -325,14 +325,12 @@ impl Context {
         Ok(())
     }
 
-    pub fn refresh(&self) -> Result<(), FailLog> {
+    pub fn refresh(&self) -> Result<(), Error> {
         self.refresh_root()?;
 
-        for asgn in &self.manifest {
-            self.refresh_assignment(asgn)?;
-        }
-
-        Ok(())
+        self.manifest.iter().try_for_each(|asgn|
+            self.refresh_assignment(asgn)
+        )
     }
 
     pub fn get_slot<'a>(&'a self, asgn: &'a AsgnSpec, username: &str) -> SubmissionSlot<'a> {
@@ -343,19 +341,19 @@ impl Context {
         }
     }
 
-    fn offset_date(date: Option<&DateTime<Local>>, offset: i64) -> Result<Option<DateTime<Local>>, FailLog> {
+    fn offset_date(date: Option<&DateTime<Local>>, offset: i64) -> Result<Option<DateTime<Local>>, Error> {
         if let Some(date) = date.as_ref() {
             let offset_date = if offset >= 0 {
                 date.naive_local()
                     .checked_add_days(Days::new(offset as u64))
-                    .ok_or(FailInfo::IOFail("Extended date out of valid range.".to_owned()))?
+                    .ok_or(Error::IOFail("Extended date out of valid range.".to_owned()))?
             } else {
                 date.naive_local()
                     .checked_sub_days(Days::new(-offset as u64))
-                    .ok_or(FailInfo::IOFail("Extended date out of valid range.".to_owned()))?
+                    .ok_or(Error::IOFail("Extended date out of valid range.".to_owned()))?
             };
             let offset_date = Local.from_local_datetime(&offset_date).single()
-                .ok_or(FailInfo::IOFail("Extended date out of valid range.".to_owned()))?;
+                .ok_or(Error::IOFail("Extended date out of valid range.".to_owned()))?;
 
             Ok(Some(offset_date))
         } else {
@@ -410,7 +408,7 @@ impl Context {
         ]
     }
 
-    pub fn normal_summary_row(&self, asgn: &AsgnSpec, username: &str) -> Result<Vec<String>, FailLog> {
+    pub fn normal_summary_row(&self, asgn: &AsgnSpec, username: &str) -> Result<Vec<String>, Error> {
         let sub_dir = self.base_path.join(&asgn.name).join(username);
 
         let slot = SubmissionSlot {
@@ -434,7 +432,6 @@ impl Context {
             else if asgn.after_close() { "AFTER CLOSE" }
             else { "ENABLED" };
 
-
         let naive_due_date = match due_date {
             None => "NONE".to_owned(),
             Some(due) => {
@@ -455,9 +452,9 @@ impl Context {
         ])
     }
 
-    pub fn list_subs(&self, asgn: Option<&str>, username: Option<&str>) -> Result<(), FailLog> {
+    pub fn list_subs(&self, asgn: Option<&str>, username: Option<&str>) -> Result<(), Error> {
         let header: Vec<String> = ["ASSIGNMENT", "USER", "SUBMISSION STATUS", "EXTENSION", "GRACE"]
-            .iter().map(|s| s.to_string()).collect();
+            .into_iter().map(str::to_owned).collect();
 
         let mut table = Table::new(header.len());
         table.add_row(header)?;
@@ -465,7 +462,7 @@ impl Context {
         let asgn_names: Vec<_> = match asgn {
             Some(asgn_name) => {
                 if !self.manifest.iter().any(|asgn| asgn == asgn_name) {
-                    return Err(FailInfo::InvalidAsgn(asgn_name.to_owned()).into_log())
+                    return Err(Error::InvalidAsgn(asgn_name.to_owned()))
                 }
                 vec![asgn_name]
             }
@@ -475,7 +472,7 @@ impl Context {
         let usernames: Vec<_> = match username {
             Some(username) => {
                 if !self.members.iter().any(|member| member == username) {
-                    return Err(FailInfo::InvalidUser(username.to_owned()).into_log())
+                    return Err(Error::InvalidUser(username.to_owned()))
                 }
                 vec![username]
             }
@@ -498,14 +495,13 @@ impl Context {
         Ok(())
     }
 
-    pub fn list_asgns(&self) -> Result<(), FailLog> {
+    pub fn list_asgns(&self) -> Result<(), Error> {
         let header: Vec<String> = ["NAME", "STATUS", "ACTIVE", "VISIBLE", "DUE", "FILES"].into_iter()
             .map(str::to_owned)
             .collect();
 
         let mut table = Table::new(header.len());
         table.add_row(header)?;
-
 
         let body = self.manifest.iter()
             .filter_map(|name| self.catalog.get(name) )
@@ -521,7 +517,7 @@ impl Context {
         Ok(())
     }
 
-    pub fn summary(&self) -> Result<(), FailLog> {
+    pub fn summary(&self) -> Result<(), Error> {
         let header = ["ASSIGNMENT", "STATUS", "DUE DATE", "SUBMISSION STATUS", "FILES"].map(str::to_owned);
 
         let mut table = Table::new(header.len());
@@ -573,14 +569,14 @@ impl Context {
     }
 }
 
-pub fn init(base_path: impl AsRef<Path>) -> Result<(), FailLog> {
+pub fn init(base_path: impl AsRef<Path>) -> Result<(), ErrorLog> {
     let base_path = base_path.as_ref();
 
     if !base_path.exists() {
-        return Err(FailInfo::Custom(
+        return Err(Error::Custom(
             "Course directory path does not exist.".to_owned(),
             "Ensure that the provided path corresponds to an existing directory.".to_owned(),
-        ).into_log())
+        ).into());
     }
 
     util::refresh_dir(base_path, 0o755, iter::empty())?;

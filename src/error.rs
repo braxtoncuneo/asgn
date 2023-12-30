@@ -2,7 +2,7 @@ use std::{fmt, path::PathBuf};
 use colored::Colorize;
 
 #[derive(Debug, Clone)]
-pub enum FailInfo {
+pub enum Error {
     NoBaseDir(PathBuf),
     LocalBuildFail(String),
     DestBuildFail(String),
@@ -31,9 +31,9 @@ pub enum FailInfo {
     Custom(String, String),
 }
 
-impl FailInfo {
+impl Error {
     fn description(&self) -> String {
-        use FailInfo::*;
+        use Error::*;
         match self {
             NoBaseDir(dir)      => format!("{} '{}' {}", "Base submission directory for course".red(), dir.to_string_lossy(), "does not exist".red()),
             NoSpec(name, desc)  => format!( "{} {} {} {}", "Specification file for".red(), name, "could not be read, IO Error:".red(), desc),
@@ -65,7 +65,7 @@ impl FailInfo {
     }
 
     fn advice(&self) -> String {
-        use FailInfo::*;
+        use Error::*;
         match self {
             NoBaseDir(_)
             | NoSpec(_, _)
@@ -99,27 +99,23 @@ impl FailInfo {
             Custom(_, text)  => format!("{}", text.yellow()),
         }
     }
-
-    pub fn into_log(self) -> FailLog {
-        self.into()
-    }
 }
 
-impl fmt::Display for FailInfo {
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}\n{}", self.description(), self.advice())
     }
 }
 
 #[derive(Default, Clone, Debug)]
-pub struct FailLog(Vec<FailInfo>);
+pub struct ErrorLog(Vec<Error>);
 
-impl FailLog {
+impl ErrorLog {
     pub fn new() -> Self {
         Self(Vec::new())
     }
 
-    pub fn push(&mut self, info: FailInfo) {
+    pub fn push(&mut self, info: Error) {
         self.0.push(info);
     }
 
@@ -134,35 +130,34 @@ impl FailLog {
     }
 }
 
-impl From<FailInfo> for FailLog {
-    fn from(info: FailInfo) -> Self {
+impl From<Error> for ErrorLog {
+    fn from(info: Error) -> Self {
         Self(vec![info])
     }
 }
 
-
-impl IntoIterator for FailLog {
-    type Item = FailInfo;
-    type IntoIter = std::vec::IntoIter<FailInfo>;
+impl IntoIterator for ErrorLog {
+    type Item = Error;
+    type IntoIter = std::vec::IntoIter<Error>;
 
     fn into_iter(self) -> Self::IntoIter{
         self.0.into_iter()
     }
 }
 
-impl FromIterator<FailInfo> for FailLog {
-    fn from_iter<I: IntoIterator<Item=FailInfo>>(iter: I) -> Self {
-        Self(Vec::<FailInfo>::from_iter(iter))
+impl FromIterator<Error> for ErrorLog {
+    fn from_iter<I: IntoIterator<Item=Error>>(iter: I) -> Self {
+        Self(Vec::<Error>::from_iter(iter))
     }
 }
 
-impl Extend<FailInfo> for FailLog {
-    fn extend<T: IntoIterator<Item=FailInfo>>(&mut self, iter: T) {
+impl Extend<Error> for ErrorLog {
+    fn extend<T: IntoIterator<Item=Error>>(&mut self, iter: T) {
         self.0.extend(iter)
     }
 }
 
-impl fmt::Display for FailLog {
+impl fmt::Display for ErrorLog {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.0.iter().try_for_each(|item|
             writeln!(

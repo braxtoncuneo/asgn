@@ -4,9 +4,9 @@ use super::student::StudentAct;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    asgn_spec::{AsgnSpec, FatalError},
+    asgn_spec::{AsgnSpec, SubmissionFatal},
     context::Context,
-    fail_info::FailLog,
+    error::{ErrorLog, Error},
     util,
 };
 
@@ -76,7 +76,7 @@ pub enum GraderAct {
 }
 
 impl GraderAct {
-    fn build(asgn_name: &str, context: &Context) -> Result<(), FailLog> {
+    fn build(asgn_name: &str, context: &Context) -> Result<(), Error> {
         let spec: &AsgnSpec = context.catalog_get(asgn_name)?;
         let cwd = context.cwd.clone();
         let _ = spec.run_ruleset(context, spec.build.as_ref(), &cwd, false);
@@ -84,19 +84,19 @@ impl GraderAct {
         Ok(())
     }
 
-    fn grade(asgn_name: &str, context: &Context) -> Result<(), FailLog> {
+    fn grade(asgn_name: &str, context: &Context) -> Result<(), Error> {
         let spec = context.catalog_get(asgn_name)?;
         let cwd = context.cwd.clone();
 
         let check_result = spec.run_on_grade(context, spec.check.as_ref(), &cwd, "Evaluating Checks", true);
 
-        if check_result == Some(Err(FatalError)) {
+        if check_result == Some(Err(SubmissionFatal)) {
             return Ok(());
         }
 
         let score_result = spec.run_on_grade(context, spec.score.as_ref(), &cwd, "Evaluating Scores", true);
 
-        if score_result == Some(Err(FatalError)) {
+        if score_result == Some(Err(SubmissionFatal)) {
             return Ok(());
         }
 
@@ -109,7 +109,7 @@ impl GraderAct {
         Ok(())
     }
 
-    fn check(asgn_name: &str, context: &Context) -> Result<(), FailLog> {
+    fn check(asgn_name: &str, context: &Context) -> Result<(), Error> {
         let spec = context.catalog_get(asgn_name)?;
 
         util::print_bold_hline();
@@ -121,7 +121,7 @@ impl GraderAct {
         Ok(())
     }
 
-    fn score(asgn_name: &str, context: &Context) -> Result<(), FailLog> {
+    fn score(asgn_name: &str, context: &Context) -> Result<(), Error> {
         let spec = context.catalog_get(asgn_name)?;
 
         util::print_bold_hline();
@@ -133,7 +133,7 @@ impl GraderAct {
         Ok(())
     }
 
-    pub fn copy(asgn_name: &str, username: &str, dst_dir: Option<&Path>, context: &Context) -> Result<(), FailLog> {
+    pub fn copy(asgn_name: &str, username: &str, dst_dir: Option<&Path>, context: &Context) -> Result<(), Error> {
         let spec = context.catalog_get(asgn_name)?;
         let dst_dir = dst_dir.unwrap_or(&context.cwd);
         let dst_dir = util::make_fresh_dir(dst_dir, username);
@@ -141,17 +141,17 @@ impl GraderAct {
         spec.retrieve_sub(&dst_dir, username)?;
 
         let build_result = spec.run_on_submit(context, spec.build.as_ref(), &dst_dir, "Building", false);
-        if build_result == Some(Err(FatalError)) {
+        if build_result == Some(Err(SubmissionFatal)) {
             return Ok(());
         }
 
         let check_result = spec.run_on_submit(context, spec.check.as_ref(), &dst_dir, "Evaluating Checks", true);
-        if check_result == Some(Err(FatalError)) {
+        if check_result == Some(Err(SubmissionFatal)) {
             return Ok(());
         }
 
         let score_result = spec.run_on_submit(context, spec.score.as_ref(), &dst_dir, "Evaluating Scores", true);
-        if score_result == Some(Err(FatalError)) {
+        if score_result == Some(Err(SubmissionFatal)) {
             return Ok(());
         }
         util::print_bold_hline();
@@ -159,7 +159,7 @@ impl GraderAct {
         Ok(())
     }
 
-    pub fn copy_all(asgn_name: &str, dst_dir: Option<&Path>, context: &Context) -> Result<(), FailLog> {
+    pub fn copy_all(asgn_name: &str, dst_dir: Option<&Path>, context: &Context) -> Result<(), Error> {
         let dst_dir = dst_dir.map(Path::to_path_buf).unwrap_or(
             util::make_fresh_dir(&context.cwd, asgn_name)
         );
@@ -175,16 +175,18 @@ impl GraderAct {
         Ok(())
     }
 
-    pub fn execute(&self, context: &Context) -> Result<(), FailLog> {
+    pub fn execute(&self, context: &Context) -> Result<(), ErrorLog> {
         use GraderAct::*;
         match self {
-            Student(act)                  => act.execute(context),
-            Copy { asgn_name, stud_name } => Self::copy(asgn_name, stud_name, None, context),
-            CopyAll { asgn_name }         => Self::copy_all(asgn_name, None, context),
-            Build { asgn_name }           => Self::build(asgn_name, context),
-            Grade { asgn_name }           => Self::grade(asgn_name, context),
-            Check { asgn_name }           => Self::check(asgn_name, context),
-            Score { asgn_name }           => Self::score(asgn_name, context),
+            Student(act)                  => act.execute(context)?,
+            Copy { asgn_name, stud_name } => Self::copy(asgn_name, stud_name, None, context)?,
+            CopyAll { asgn_name }         => Self::copy_all(asgn_name, None, context)?,
+            Build { asgn_name }           => Self::build(asgn_name, context)?,
+            Grade { asgn_name }           => Self::grade(asgn_name, context)?,
+            Check { asgn_name }           => Self::check(asgn_name, context)?,
+            Score { asgn_name }           => Self::score(asgn_name, context)?,
         }
+
+        Ok(())
     }
 }
