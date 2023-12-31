@@ -2,10 +2,11 @@ use dirs;
 use itertools::Itertools;
 
 use std::{
-    fs,
+    fs::{self, Permissions},
     io::Write,
     path::{Path, PathBuf},
     process::{Command, ExitStatus, Stdio}, fmt::{self, Write as _},
+    os::unix::fs::PermissionsExt,
 };
 
 use crate::error::Error;
@@ -52,22 +53,9 @@ pub fn run_at(mut cmd: Command, path: impl AsRef<Path>, pipe_stdout: bool) -> Re
 }
 
 pub fn set_mode(path: impl AsRef<Path>, mode: u32) -> Result<(), Error> {
-    let path = path.as_ref();
-
-    let mut cmd = std::process::Command::new("chmod");
-    cmd.arg(format!("{mode:o}"));
-    cmd.arg(path);
-
-    let output = cmd.output().map_err(|err|
-        Error::IOFail(format!("chmoding {}: {}", path.display(), err))
-    )?;
-
-    if !output.status.success() {
-        let err_msg = String::from_utf8_lossy(&output.stderr).into_owned();
-        return Err(Error::IOFail(err_msg))
-    }
-
-    Ok(())
+    fs::set_permissions(path.as_ref(), Permissions::from_mode(mode)).map_err(|err|
+        Error::IOFail(format!("chmoding {}: {}", path.as_ref().display(), err))
+    )
 }
 
 #[derive(Clone)]
