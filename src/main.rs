@@ -30,8 +30,8 @@ fn main() {
             Ok(ctx) => {
                 if command == Some("init") {
                     print!("{}", FailInfo::Custom(
-                        "Provided path is already the base path of a pre-existing, valid course directory.".to_string(),
-                        "Either clear out that directory, or use a different one.".to_string()
+                        "Provided path is already the base path of a pre-existing, valid course directory.".to_owned(),
+                        "Either clear out that directory, or use a different one.".to_owned()
                     ));
                     return;
                 }
@@ -51,8 +51,6 @@ fn main() {
         Role::Grader => act::grader::GraderCmd::from_args().act.execute(&context),
         Role::Student => act::student::StudentCmd::from_args().act.execute(&context),
         Role::Other => {
-            //let cmd = act::other::OtherCmd::from_args();
-            //cmd.act.execute(&context)
             println!("{}", "! User not recognized as member of course.".red());
             println!("{}", "> If you believe you are a member, contact the instructor.".yellow());
             return;

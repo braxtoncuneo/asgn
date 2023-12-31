@@ -4,8 +4,6 @@ use colored::Colorize;
 #[derive(Debug, Clone)]
 pub enum FailInfo {
     NoBaseDir(PathBuf),
-    //NoSubDir(String),
-    //NoSrcDir(PathBuf),
     LocalBuildFail(String),
     DestBuildFail(String),
     FormatFail(String),
@@ -14,7 +12,7 @@ pub enum FailInfo {
     NoSpec(String, String),
     BadSpec(String, String),
     IOFail(String),
-    InvalidUID(),
+    InvalidUID(u32),
     InvalidCWD(),
     InvalidAsgn(String),
     InvalidUser(String),
@@ -38,13 +36,13 @@ impl FailInfo {
         use FailInfo::*;
         match self {
             NoBaseDir(dir)      => format!("{} '{}' {}", "Base submission directory for course".red(), dir.to_string_lossy(), "does not exist".red()),
-            NoSpec(name, desc)  => format!( "{} {} {} '{}'", "Specification file for".red(), name, "could not be read. IO Error".red(), desc),
-            BadSpec(name, desc) => format!( "{} {} {} '{}'", "Specification file for".red(), name, "is malformed. Parse Error".red(), desc),
+            NoSpec(name, desc)  => format!( "{} {} {} {}", "Specification file for".red(), name, "could not be read, IO Error:".red(), desc),
+            BadSpec(name, desc) => format!( "{} {} {} {}", "Specification file for".red(), name, "is malformed, Parse Error:".red(), desc),
             IOFail(desc)        => format!( "{} '{}'", "IO Failure".red(), desc),
             InvalidAsgn(name)   => format!("{} '{}' {}", "Assignment".red(), name, "is invalid or non-existant.".red()),
-            InvalidUser(name)   => format!("{} '{}' {}", "User name".red(), name, "is invalid or non-existant".red()),
-            InvalidCWD()        => format!("{}", "Current working directory is invalid.".red()),
-            InvalidUID()        => format!("{}", "User identifier invalid.".red()),
+            InvalidUser(name)   => format!("{} '{}' {}", "User".red(), name, "is invalid or non-existant".red()),
+            InvalidCWD()        => format!("{}", "Failed to access Current Working Directory.".red()),
+            InvalidUID(uid)     => format!("{}", format!("UID {uid} is invalid.").red()),
             LocalBuildFail(err) => format!("{}\n\n{}", "Build failure in current working directory:".red(), err),
             DestBuildFail(err)  => format!("{}\n\n{}", "Build failure in submission directory:".red(), err),
             FormatFail(err)     => format!("{}\n\n{}", "Failed to format files. Error:".red(), err),
@@ -52,10 +50,10 @@ impl FailInfo {
             TestFail(err)       => format!("{}\n\n{}", "Failed to test functionality due to internal error. Error:".red(), err),
             MissingFile(name)   => format!("{} '{}' {}", "File".red(), name, "does not exist in current working directory.".red()),
             MissingSub(name)    => format!("{} '{}' {}", "File".red(), name, "does not exist in the submission directory".red()),
-            FileIsDir(name)     => format!("{} '{}' {}", "File".red(), name, "is actually a directory".red(),),
+            FileIsDir(name)     => format!("{} '{}' {}", "File".red(), name, "is actually a directory".red()),
             FileIsOther(name)   => format!("{} '{}' {}", "File".red(), name, "in neither a file nor a directory".red()),
             NoSetup(name)       => format!("{} '{}'", "Setup files are not available for assignment".red(), name),
-            Unauthorized()      => format!( "{}", "Action is not authorized".red()),
+            Unauthorized()      => format!("{}", "Action is not authorized".red()),
             BeforeOpen          => format!("{}", "Assignments cannot be interacted with before their open date.".red()),
             AfterClose          => format!("{}", "Assignments cannot be interacted with after their close date.".red()),
             Inactive            => format!("{}", "Interaction with this assignment is currently disabled.".red()),
@@ -69,32 +67,36 @@ impl FailInfo {
     fn advice(&self) -> String {
         use FailInfo::*;
         match self {
-            NoBaseDir(_)      => format!("{}", "Please contact the instructor.".yellow()),
-            InvalidAsgn(name) => format!("{} '{}' {}", "If you believe".yellow(), name, "is a valid assignment name, please contact the instructor.".yellow()),
-            InvalidUser(name) => format!("{} '{}' {}", "If you believe".yellow(), name, "is a valid user name, please contact the instructor.".yellow()),
-            NoSpec(_,_)       => format!("{}", "Please contact the instructor.".yellow()),
-            BadSpec(_,_)      => format!("{}", "Please contact the instructor.".yellow()),
-            IOFail(_desc)     => format!("{}", "Please contact the instructor.".yellow()),
-            InvalidCWD()      => format!("{}", "Please ensure that the current working directory is valid.".yellow()),
-            InvalidUID()      => format!("{}", "Please contact the instructor.".yellow()),
-            LocalBuildFail(_) => format!("{}", "All compilation errors must be fixed.".yellow()),
-            DestBuildFail(_)  => format!("{}", "Please ensure that only the files listed by the assignment are necessary for compilation.".yellow()),
-            FormatFail(_)     => format!("{}", "Please fix the errors noted above.".yellow()),
-            StyleFail(_)      => format!("{}", "Please fix the errors noted above.".yellow()),
-            TestFail(_)       => format!("{}", "Please contact the instructor.".yellow()),
-            MissingFile(name) => format!("{} '{}' {}", "Please ensure".yellow(), name, "is an existing file in your directory.".yellow()),
-            MissingSub(name)  => format!("{} '{}' {}", "File", name, "cannot be recovered.".yellow()),
-            FileIsDir(name)   => format!("{} '{}' {}", "Please ensure that".yellow(), name, "is a file.".yellow()),
-            FileIsOther(name) => format!("{} '{}' {}", "Please ensure that".yellow(), name, "is truely a file.".yellow()),
-            NoSetup(name)     => format!("{} '{}' {}", "If you believe assignment".yellow(), name, "should have setup files, please contact the instructor".yellow()),
-            Unauthorized()    => format!("{}", "Please contact the instructor".yellow()),
-            BeforeOpen        => format!("{}", "If you believe this assignment should be open, contact the instructor.".yellow()),
-            AfterClose        => format!("{}", "If you believe this assignment should not be closed yet, contact the instructor.".yellow()),
-            Inactive          => format!("{}", "If you believe this assignment should be enabled, contact the instructor.".yellow()),
-            NoGrace           => format!("{}", "Assignments should be turned in on-time for full credit.".yellow()),
-            NotEnoughGrace    => format!("{}", "To increase the number of available grace days, remove grace days from other assignments.".yellow()),
-            GraceLimit        => format!("{}", "Assignments should be turned in before the grace day limit for full credit.".yellow()),
-            Custom(_, text)   => format!("{}", text.yellow()),
+            NoBaseDir(_)
+            | NoSpec(_, _)
+            | BadSpec(_, _)
+            | IOFail(_)
+            | InvalidUID(_)
+            | TestFail(_)
+            | Unauthorized() => format!("{}", "Please contact the instructor.".yellow()),
+
+            InvalidAsgn(_)
+            | InvalidUser(_)
+            | NoSetup(_)
+            | BeforeOpen
+            | AfterClose
+            | Inactive => format!("{}", "If this is an error, please contact the instructor.".yellow()),
+
+            LocalBuildFail(_)
+            | FormatFail(_)
+            | StyleFail(_) => format!("{}", "Please fix the required errors.".yellow()),
+
+            MissingFile(name)
+            | FileIsDir(name)
+            | FileIsOther(name) => format!("{} '{}' {}", "Please ensure that".yellow(), name, "is a file.".yellow()),
+
+            InvalidCWD()     => format!("{}", "Please change to a valid directory.".yellow()),
+            DestBuildFail(_) => format!("{}", "Please ensure that only the files listed by the assignment are necessary for compilation.".yellow()),
+            MissingSub(name) => format!("{} '{}' {}", "File", name, "cannot be recovered.".yellow()),
+            NoGrace          => format!("{}", "Assignments should be turned in on-time for full credit.".yellow()),
+            NotEnoughGrace   => format!("{}", "To increase the number of available grace days, remove grace days from other assignments.".yellow()),
+            GraceLimit       => format!("{}", "Assignments should be turned in before the grace day limit for full credit.".yellow()),
+            Custom(_, text)  => format!("{}", text.yellow()),
         }
     }
 
@@ -105,7 +107,7 @@ impl FailInfo {
 
 impl fmt::Display for FailInfo {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f,"{}\n{}",self.description(),self.advice())
+        write!(f, "{}\n{}", self.description(), self.advice())
     }
 }
 
@@ -162,11 +164,11 @@ impl Extend<FailInfo> for FailLog {
 
 impl fmt::Display for FailLog {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.0.iter().map(|item|
+        self.0.iter().try_for_each(|item|
             writeln!(
                 f, "{} {}\n{} {}",
                 "!".red(), item.description(), ">".yellow(), &item.advice(),
             )
-        ).collect()
+        )
     }
 }
