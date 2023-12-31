@@ -7,10 +7,8 @@ use crate::{
     asgn_spec::{AsgnSpec, SubmissionFatal},
     context::Context,
     error::{ErrorLog, Error},
-    util,
+    util::{self, color::{FG_YELLOW, TEXT_BOLD, STYLE_RESET}},
 };
-
-use colored::Colorize;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -101,7 +99,7 @@ impl GraderAct {
         }
 
         println!("{}", util::Hline::Bold);
-        println!("{}", "Evaluating Grades".yellow().bold());
+        println!("{FG_YELLOW}{TEXT_BOLD}Evaluating Grades{STYLE_RESET}");
         let _ = spec.run_ruleset(context, spec.grade.as_ref(), &cwd, true);
 
         println!("{}", util::Hline::Bold);
@@ -113,7 +111,7 @@ impl GraderAct {
         let spec = context.catalog_get(asgn_name)?;
 
         println!("{}", util::Hline::Bold);
-        println!("{}", "Evaluating Checks".yellow().bold());
+        println!("{FG_YELLOW}{TEXT_BOLD}Evaluating Checks{STYLE_RESET}");
         let cwd = context.cwd.clone();
         let _ = spec.run_ruleset(context, spec.check.as_ref(), &cwd, true);
         println!("{}", util::Hline::Bold);
@@ -125,7 +123,7 @@ impl GraderAct {
         let spec = context.catalog_get(asgn_name)?;
 
         println!("{}", util::Hline::Bold);
-        println!("{}", "Evaluating Scores".yellow().bold());
+        println!("{FG_YELLOW}{TEXT_BOLD}Evaluating Scores{STYLE_RESET}");
         let cwd = context.cwd.clone();
         let _ = spec.run_ruleset(context, spec.score.as_ref(), &cwd, true);
         println!("{}", util::Hline::Bold);
@@ -165,7 +163,7 @@ impl GraderAct {
         );
         util::refresh_dir(&dst_dir, 0o700, Vec::new().iter())?;
         for member_name in &context.members {
-            println!("{}", format!("Retrieving Submission for '{member_name}'").bold());
+            println!("{TEXT_BOLD}Retrieving Submission for '{member_name}'{STYLE_RESET}");
             if let Err(err) = Self::copy(asgn_name, member_name, Some(&dst_dir), context) {
                 println!("{}", util::Hline::Bold);
                 print!("{err}");

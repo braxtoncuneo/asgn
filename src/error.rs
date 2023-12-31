@@ -1,5 +1,5 @@
 use std::{fmt, path::PathBuf};
-use colored::Colorize;
+use crate::util::color::{FG_RED, FG_YELLOW, STYLE_RESET};
 
 #[derive(Debug, Clone)]
 pub enum Error {
@@ -22,7 +22,8 @@ pub enum Error {
     FileIsDir(String),
     FileIsOther(String),
     NoSetup(String),
-    Unauthorized(),
+    NoSuchMember(String),
+    Unauthorized,
     BeforeOpen,
     AfterClose,
     Inactive,
@@ -32,42 +33,43 @@ pub enum Error {
     Custom(String, String),
 }
 
-impl Error {
-    fn description(&self) -> String {
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use Error::*;
-        match self {
-            NoBaseDir(dir)      => format!("{} '{}' {}", "Base submission directory for course".red(), dir.to_string_lossy(), "does not exist".red()),
-            NoSpec(name, desc)  => format!( "{} {} {} {}", "Specification file for".red(), name, "could not be read, IO Error:".red(), desc),
-            BadSpec(name, desc) => format!( "{} {} {} {}", "Specification file for".red(), name, "is malformed, Parse Error:".red(), desc),
-            IOFail(desc)        => format!( "{} '{}'", "IO Failure".red(), desc),
-            InvalidAsgn(name)   => format!("{} '{}' {}", "Assignment".red(), name, "is invalid or non-existant.".red()),
-            InvalidUser(name)   => format!("{} '{}' {}", "User".red(), name, "is invalid or non-existant".red()),
-            InvalidCWD()        => format!("{}", "Failed to access Current Working Directory.".red()),
-            InvalidUID(uid)     => format!("{}", format!("UID {uid} is invalid.").red()),
-            LocalBuildFail(err) => format!("{}\n\n{}", "Build failure in current working directory:".red(), err),
-            DestBuildFail(err)  => format!("{}\n\n{}", "Build failure in submission directory:".red(), err),
-            FormatFail(err)     => format!("{}\n\n{}", "Failed to format files. Error:".red(), err),
-            StyleFail(err)      => format!("{}\n\n{}", "Failed to check style. Error:".red(), err),
-            TestFail(err)       => format!("{}\n\n{}", "Failed to test functionality due to internal error. Error:".red(), err),
-            TableError          => format!("{}", "Failure while constructing output table.".red()),
-            MissingFile(name)   => format!("{} '{}' {}", "File".red(), name, "does not exist in current working directory.".red()),
-            MissingSub(name)    => format!("{} '{}' {}", "File".red(), name, "does not exist in the submission directory".red()),
-            FileIsDir(name)     => format!("{} '{}' {}", "File".red(), name, "is actually a directory".red()),
-            FileIsOther(name)   => format!("{} '{}' {}", "File".red(), name, "in neither a file nor a directory".red()),
-            NoSetup(name)       => format!("{} '{}'", "Setup files are not available for assignment".red(), name),
-            Unauthorized()      => format!("{}", "Action is not authorized".red()),
-            BeforeOpen          => format!("{}", "Assignments cannot be interacted with before their open date.".red()),
-            AfterClose          => format!("{}", "Assignments cannot be interacted with after their close date.".red()),
-            Inactive            => format!("{}", "Interaction with this assignment is currently disabled.".red()),
-            NoGrace             => format!("{}", "This course does not provide grace days.".red()),
-            NotEnoughGrace      => format!("{}", "There aren't enough free grace days to provide such an extension.".red()),
-            GraceLimit          => format!("{}", "The number of grace days requested exceeds the per-assignment grace day limit.".red()),
-            Custom(text, _)     => format!("{}", text.red()),
-        }
-    }
 
-    fn advice(&self) -> String {
-        use Error::*;
+        write!(f, "{FG_RED}! ")?;
+        match self {
+            NoBaseDir(dir)      => write!(f, "Base submission directory for course{STYLE_RESET} '{}' {FG_RED}does not exist.", dir.display()),
+            NoSpec(name, desc)  => write!(f, "Specification file for{STYLE_RESET} {name} {FG_RED}could not be read, IO Error:{STYLE_RESET} {desc}"),
+            BadSpec(name, desc) => write!(f, "Specification file for{STYLE_RESET} {name} {FG_RED}is malformed:{STYLE_RESET} {desc}"),
+            IOFail(desc)        => write!(f, "IO Failure:{STYLE_RESET} {desc}"),
+            InvalidAsgn(name)   => write!(f, "Assignment{STYLE_RESET} '{name}' {FG_RED}is invalid or non-existant."),
+            InvalidUser(name)   => write!(f, "User{STYLE_RESET} '{name}' {FG_RED}is invalid."),
+            InvalidCWD()        => write!(f, "Failed to access Current Working Directory."),
+            InvalidUID(uid)     => write!(f, "UID {uid} is invalid."),
+            LocalBuildFail(err) => write!(f, "\n\nBuild failure in current working directory:{STYLE_RESET} {err}"),
+            DestBuildFail(err)  => write!(f, "\n\nBuild failure in submission directory:{STYLE_RESET} {err}"),
+            FormatFail(err)     => write!(f, "\n\nFailed to format files:{STYLE_RESET} {err}"),
+            StyleFail(err)      => write!(f, "\n\nFailed to check style:{STYLE_RESET} {err}"),
+            TestFail(err)       => write!(f, "\n\nFailed to test functionality due to internal error:{STYLE_RESET} {err}"),
+            MissingFile(name)   => write!(f, "File{STYLE_RESET} '{name}' {FG_RED}does not exist in current working directory."),
+            MissingSub(name)    => write!(f, "File{STYLE_RESET} '{name}' {FG_RED}does not exist in the submission directory."),
+            FileIsDir(name)     => write!(f, "File{STYLE_RESET} '{name}' {FG_RED}is actually a directory."),
+            FileIsOther(name)   => write!(f, "File{STYLE_RESET} '{name}' {FG_RED}in neither a file nor a directory."),
+            NoSetup(name)       => write!(f, "Setup files are not available for assignment{STYLE_RESET} '{name}'{FG_RED}."),
+            NoSuchMember(name)  => write!(f, "User{STYLE_RESET} '{name}' {FG_RED} is not a member of this course."),
+            TableError          => write!(f, "Failure while constructing output table."),
+            Unauthorized        => write!(f, "You are not authorized to perform this action."),
+            BeforeOpen          => write!(f, "Assignments cannot be interacted with before their open date."),
+            AfterClose          => write!(f, "Assignments cannot be interacted with after their close date."),
+            Inactive            => write!(f, "Interaction with this assignment is currently disabled."),
+            NoGrace             => write!(f, "This course does not provide grace days."),
+            NotEnoughGrace      => write!(f, "There aren't enough free grace days to provide such an extension."),
+            GraceLimit          => write!(f, "The number of grace days requested exceeds the per-assignment grace day limit."),
+            Custom(text, _)     => f.write_str(text),
+        }?;
+
+        write!(f, "\n{FG_YELLOW}> ")?;
         match self {
             NoBaseDir(_)
             | NoSpec(_, _)
@@ -76,37 +78,34 @@ impl Error {
             | InvalidUID(_)
             | TestFail(_)
             | TableError
-            | Unauthorized() => format!("{}", "Please contact the instructor.".yellow()),
+            | Unauthorized => write!(f, "Please contact the instructor."),
 
             InvalidAsgn(_)
             | InvalidUser(_)
             | NoSetup(_)
+            | NoSuchMember(_)
             | BeforeOpen
             | AfterClose
-            | Inactive => format!("{}", "If this is an error, please contact the instructor.".yellow()),
+            | Inactive => write!(f, "If this is an error, please contact the instructor."),
 
             LocalBuildFail(_)
             | FormatFail(_)
-            | StyleFail(_) => format!("{}", "Please fix the required errors.".yellow()),
+            | StyleFail(_) => write!(f, "Please fix the required errors."),
 
             MissingFile(name)
             | FileIsDir(name)
-            | FileIsOther(name) => format!("{} '{}' {}", "Please ensure that".yellow(), name, "is a file.".yellow()),
+            | FileIsOther(name) => write!(f, "Please ensure that{STYLE_RESET} '{name}' {FG_YELLOW}is a file."),
 
-            InvalidCWD()     => format!("{}", "Please change to a valid directory.".yellow()),
-            DestBuildFail(_) => format!("{}", "Please ensure that only the files listed by the assignment are necessary for compilation.".yellow()),
-            MissingSub(name) => format!("{} '{}' {}", "File", name, "cannot be recovered.".yellow()),
-            NoGrace          => format!("{}", "Assignments should be turned in on-time for full credit.".yellow()),
-            NotEnoughGrace   => format!("{}", "To increase the number of available grace days, remove grace days from other assignments.".yellow()),
-            GraceLimit       => format!("{}", "Assignments should be turned in before the grace day limit for full credit.".yellow()),
-            Custom(_, text)  => format!("{}", text.yellow()),
-        }
-    }
-}
+            InvalidCWD()     => write!(f, "Please change to a valid directory."),
+            DestBuildFail(_) => write!(f, "Please ensure that only the files listed by the assignment are necessary for compilation."),
+            MissingSub(name) => write!(f, "File{STYLE_RESET} '{name}' {FG_YELLOW}cannot be recovered."),
+            NoGrace          => write!(f, "Assignments should be turned in on-time for full credit."),
+            NotEnoughGrace   => write!(f, "To increase the number of available grace days, remove grace days from other assignments."),
+            GraceLimit       => write!(f, "Assignments should be turned in before the grace day limit for full credit."),
+            Custom(_, text)  => f.write_str(text)
+        }?;
 
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}\n{}", self.description(), self.advice())
+        write!(f, "{STYLE_RESET}")
     }
 }
 
@@ -157,16 +156,5 @@ impl FromIterator<Error> for ErrorLog {
 impl Extend<Error> for ErrorLog {
     fn extend<T: IntoIterator<Item=Error>>(&mut self, iter: T) {
         self.0.extend(iter)
-    }
-}
-
-impl fmt::Display for ErrorLog {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.0.iter().try_for_each(|item|
-            writeln!(
-                f, "{} {}\n{} {}",
-                "!".red(), item.description(), ">".yellow(), &item.advice(),
-            )
-        )
     }
 }

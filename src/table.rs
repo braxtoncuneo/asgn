@@ -1,7 +1,6 @@
 use core::fmt;
 
-use crate::error;
-use colored::Colorize;
+use crate::{error, util::color::{STYLE_RESET, COLOR_REVERSED, BG_LIGHT_BLACK}};
 use itertools::Itertools;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -69,12 +68,11 @@ impl fmt::Display for Table {
                 .map(|(text, width)| format!(" {text:width$} "))
                 .join("|");
 
-            let styled = match i {
-                0 => text.reversed().to_string(),
-                i if i % 2 == 0 => text.on_bright_black().to_string(),
-                _ => text
-            };
-            writeln!(f, "{styled}")?;
+            match i {
+                0 => writeln!(f, "{COLOR_REVERSED}{text}{STYLE_RESET}"),
+                i if i % 2 == 0 => writeln!(f, "{BG_LIGHT_BLACK}{text}{STYLE_RESET}"),
+                _ => writeln!(f, "{text}"),
+            }?
         }
 
         Ok(())
