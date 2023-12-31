@@ -10,7 +10,6 @@ pub mod table;
 use structopt::StructOpt;
 use error::Error;
 use context::{Context, Role};
-use colored::Colorize;
 
 fn main() {
     let mut args = std::env::args().skip(1).peekable();
@@ -39,7 +38,9 @@ fn main() {
             }
             Err(err) => return match command {
                 Some("init") => if let Err(log) = context::init(&base_path) {
-                    print!("{log}");
+                    for err in log {
+                        println!("{err}");
+                    }
                 },
                 _ => println!("{err}"),
             }
@@ -51,20 +52,23 @@ fn main() {
         Role::Grader => act::grader::GraderCmd::from_args().act.execute(&context),
         Role::Student => act::student::StudentCmd::from_args().act.execute(&context),
         Role::Other => {
-            println!("{}", "! User not recognized as member of course.".red());
-            println!("{}", "> If you believe you are a member, contact the instructor.".yellow());
+            println!("{}", Error::NoSuchMember(context.username));
             return;
         }
     };
 
     if let Err(log) = result {
-        print!("{log}");
+        for err in log {
+            println!("{err}");
+        }
     }
 
     if
         context.role == Role::Instructor
         && args.peek().map(String::as_str) != Some("refresh")
     {
-        print!("{}", context.all_catalog_errors());
+        for err in context.all_catalog_errors() {
+            println!("{err}")
+        }
     }
 }

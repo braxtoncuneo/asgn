@@ -8,11 +8,10 @@ use crate:: {
     error:: {ErrorLog, Error},
     asgn_spec::{AsgnSpec, StatBlock, StatBlockSet},
     act::{student::StudentAct, grader::GraderAct},
-    util,
+    util::{self, color::{FG_YELLOW, TEXT_BOLD, STYLE_RESET}},
 };
 
 use structopt::StructOpt;
-use colored::Colorize;
 use tempfile::tempdir_in;
 use chrono::Duration;
 
@@ -364,7 +363,7 @@ impl InstructorAct {
         if let Some(stats) = stats {
             let old_time = util::date_into_chrono(stats.time.clone())?;
             if turn_in_time.signed_duration_since(old_time) <= Duration::seconds(1) {
-                println!("{}", format!("{username} is already up-to-date.").yellow().bold());
+                println!("{FG_YELLOW}{TEXT_BOLD}{username} is already up-to-date.{STYLE_RESET}");
                 return Ok(Some(stats.clone()));
             }
         }
@@ -412,7 +411,7 @@ impl InstructorAct {
                     new_stats.stat_block = Some(vec![block]);
                 }
                 Err(log) => print!("{log}"),
-                _ => println!("{}", format!("{member} has no submission.").yellow().bold()),
+                _ => println!("{FG_YELLOW}{TEXT_BOLD}{member} has no submission.{STYLE_RESET}"),
             }
         }
 
