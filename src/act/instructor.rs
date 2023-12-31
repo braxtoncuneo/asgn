@@ -5,7 +5,7 @@ use std::{
 
 use crate:: {
     context::Context,
-    fail_info:: {FailLog, FailInfo},
+    error:: {ErrorLog, Error},
     asgn_spec::{AsgnSpec, StatBlock, StatBlockSet},
     act::{student::StudentAct, grader::GraderAct},
     util,
@@ -210,7 +210,7 @@ pub enum InstructorAct {
 
 #[allow(dead_code)]
 impl InstructorAct {
-    fn add_students(usernames: Vec<String>, context: &mut Context) -> Result<(), FailLog> {
+    fn add_students(usernames: Vec<String>, context: &mut Context) -> Result<(), Error> {
         for username in usernames {
             if !context.students.iter().any(|student| student == &username) {
                 context.students.push(username);
@@ -220,12 +220,12 @@ impl InstructorAct {
         context.refresh()
     }
 
-    fn remove_students(usernames: &[String], context: &mut Context) -> Result<(), FailLog> {
+    fn remove_students(usernames: &[String], context: &mut Context) -> Result<(), Error> {
         context.students.retain(|student| !usernames.contains(student));
         context.sync()
     }
 
-    fn add_graders(usernames: Vec<String>, context: &mut Context) -> Result<(), FailLog> {
+    fn add_graders(usernames: Vec<String>, context: &mut Context) -> Result<(), Error> {
         for username in usernames {
             if !context.graders.iter().any(|grader| grader == &username) {
                 context.graders.push(username);
@@ -235,12 +235,12 @@ impl InstructorAct {
         context.refresh()
     }
 
-    fn remove_graders(usernames: &[String], context: &mut Context) -> Result<(), FailLog> {
+    fn remove_graders(usernames: &[String], context: &mut Context) -> Result<(), Error> {
         context.graders.retain(|grader| !usernames.contains(grader));
         context.sync()
     }
 
-    fn add_assignments(asgn_names: Vec<String>, context: &mut Context) -> Result<(), FailLog> {
+    fn add_assignments(asgn_names: Vec<String>, context: &mut Context) -> Result<(), Error> {
         for asgn_name in asgn_names {
             if !context.manifest.iter().any(|assignment| assignment == &asgn_name) {
                 context.manifest.push(asgn_name);
@@ -252,105 +252,104 @@ impl InstructorAct {
         Ok(())
     }
 
-    fn remove_assignments(asgn_names: &[String], context: &mut Context) -> Result<(), FailLog> {
+    fn remove_assignments(asgn_names: &[String], context: &mut Context) -> Result<(), Error> {
         context.manifest.retain(|name| !asgn_names.contains(name));
         context.sync()
     }
 
-    fn set_due(asgn_name: &str, date: &str, context: &mut Context) -> Result<(), FailLog> {
+    fn set_due(asgn_name: &str, date: &str, context: &mut Context) -> Result<(), Error> {
         let spec = context.catalog_get_mut(asgn_name)?;
         let date = toml::value::Datetime::from_str(date).map_err(|err|
-            FailInfo::IOFail(err.to_string())
+            Error::IOFail(err.to_string())
         )?;
         spec.due_date = Some(util::date_into_chrono(date)?);
         spec.sync()
     }
 
-    fn set_open(asgn_name: &str, date: &str, context: &mut Context) -> Result<(), FailLog> {
+    fn set_open(asgn_name: &str, date: &str, context: &mut Context) -> Result<(), Error> {
         let spec = context.catalog_get_mut(asgn_name)?;
         let date = toml::value::Datetime::from_str(date).map_err(|err|
-            FailInfo::IOFail(err.to_string())
+            Error::IOFail(err.to_string())
         )?;
         spec.open_date = Some(util::date_into_chrono(date)?);
         spec.sync()
     }
 
-    fn set_close(asgn_name: &str, date: &str, context: &mut Context) -> Result<(), FailLog> {
+    fn set_close(asgn_name: &str, date: &str, context: &mut Context) -> Result<(), Error> {
         let spec = context.catalog_get_mut(asgn_name)?;
         let date = toml::value::Datetime::from_str(date).map_err(|err|
-            FailInfo::IOFail(err.to_string())
+            Error::IOFail(err.to_string())
         )?;
         spec.close_date = Some(util::date_into_chrono(date)?);
         spec.sync()
     }
 
-    fn unset_due(asgn_name: &str, context: &mut Context) -> Result<(), FailLog> {
+    fn unset_due(asgn_name: &str, context: &mut Context) -> Result<(), Error> {
         let spec = context.catalog_get_mut(asgn_name)?;
         spec.due_date = None;
         spec.sync()
     }
 
-    fn unset_open(asgn_name: &str, context: &mut Context) -> Result<(), FailLog> {
+    fn unset_open(asgn_name: &str, context: &mut Context) -> Result<(), Error> {
         let spec = context.catalog_get_mut(asgn_name)?;
         spec.open_date = None;
         spec.sync()
     }
 
-    fn unset_close(asgn_name: &str, context: &mut Context) -> Result<(), FailLog> {
+    fn unset_close(asgn_name: &str, context: &mut Context) -> Result<(), Error> {
         let spec= context.catalog_get_mut(asgn_name)?;
         spec.close_date = None;
         spec.sync()
     }
 
-    fn grace_total(total: i64, context: &mut Context) -> Result<(), FailLog> {
+    fn grace_total(total: i64, context: &mut Context) -> Result<(), Error> {
         context.grace_total = Some(total);
         context.sync()
     }
 
-    fn grace_limit(limit: i64, context: &mut Context) -> Result<(), FailLog> {
+    fn grace_limit(limit: i64, context: &mut Context) -> Result<(), Error> {
         context.grace_limit = Some(limit);
         context.sync()
     }
 
-    fn no_grace(context: &mut Context) -> Result<(), FailLog> {
+    fn no_grace(context: &mut Context) -> Result<(), Error> {
         context.grace_total = None;
         context.grace_limit = None;
         context.sync()
     }
 
-    fn publish(asgn_name: &str, context: &mut Context) -> Result<(), FailLog> {
+    fn publish(asgn_name: &str, context: &mut Context) -> Result<(), Error> {
         let spec = context.catalog_get_mut(asgn_name)?;
         spec.visible = true;
         spec.sync()
     }
 
-    fn unpublish(asgn_name: &str, context: &mut Context) -> Result<(), FailLog> {
+    fn unpublish(asgn_name: &str, context: &mut Context) -> Result<(), Error> {
         let spec = context.catalog_get_mut(asgn_name)?;
         spec.visible = false;
         spec.sync()
     }
 
-    fn enable(asgn_name: &str, context: &mut Context) -> Result<(), FailLog> {
+    fn enable(asgn_name: &str, context: &mut Context) -> Result<(), Error> {
         let spec = context.catalog_get_mut(asgn_name)?;
         spec.active = true;
         spec.sync()
     }
 
-    fn disable(asgn_name: &str, context: &mut Context) -> Result<(), FailLog> {
+    fn disable(asgn_name: &str, context: &mut Context) -> Result<(), Error> {
         let spec = context.catalog_get_mut(asgn_name)?;
         spec.active = false;
         spec.sync()
     }
 
-
-    fn extend(asgn_name: &str, username: &str, ext_days: i64, context : &Context) -> Result<(), FailLog> {
+    fn extend(asgn_name: &str, username: &str, ext_days: i64, context : &Context) -> Result<(), Error> {
         let spec: &AsgnSpec = context.catalog_get(asgn_name)?;
         let slot = context.get_slot(spec, username);
         slot.set_extension(ext_days)
     }
 
     fn latest_score(old_stats: &StatBlockSet, username: &str, build_root: &Path, asgn: &AsgnSpec, context: &Context)
-    -> Result<Option<StatBlock>, FailLog>
+    -> Result<Option<StatBlock>, Error>
     {
 
         let slot = context.get_slot(asgn, username);
@@ -392,12 +391,12 @@ impl InstructorAct {
         Ok(Some(stat_block))
     }
 
-    fn update_scores(asgn_name: &str, context: &mut Context) -> Result<(), FailLog> {
+    fn update_scores(asgn_name: &str, context: &mut Context) -> Result<(), Error> {
         let spec = context.catalog_get(asgn_name)?;
         let info_path = spec.path.join(".info");
         let build_path = info_path.join(".internal").join("score_build");
         let build_path = tempdir_in(build_path.clone()).map_err(|err|
-            FailInfo::IOFail(format!("Failed to create temp dir '{}': {}", build_path.display(), err)).into_log()
+            Error::IOFail(format!("Failed to create temp dir '{}': {}", build_path.display(), err))
         )?;
 
         let stat_path = info_path.join("score.toml");
@@ -422,58 +421,55 @@ impl InstructorAct {
         Ok(())
     }
 
-    fn update_all_scores(context: &mut Context) -> Result<(), FailLog> {
+    fn update_all_scores(context: &mut Context) -> Result<(), ErrorLog> {
         let ok_asgn: Vec<_> = context.manifest.iter()
             .filter_map(|name| context.catalog.get(name) )
             .filter_map(|asgn| asgn.as_ref().ok())
             .map(|asgn| asgn.name.clone())
             .collect();
 
-        let log: FailLog = ok_asgn.into_iter()
+        let log: ErrorLog = ok_asgn.into_iter()
             .map(|asgn| Self::update_scores(&asgn, context))
             .filter_map(Result::err)
-            .flatten()
             .collect();
 
-        if !log.is_empty() {
-            print!("{log}");
-        }
-
-        Ok(())
+        log.into_result()
     }
 
-    pub fn execute(self, context: &mut Context) -> Result<(), FailLog> {
+    pub fn execute(self, context: &mut Context) -> Result<(), ErrorLog> {
         use InstructorAct::*;
         match self {
-            Grader          (act) => act.execute(context),
-            ListAsgns       {} => context.list_asgns(),
+            Grader          (act) => act.execute(context)?,
+            ListAsgns       {} => context.list_asgns()?,
             ListSubs        { asgn_name, username } => context.list_subs(
                 asgn_name.as_ref().unwrap_or(&None).as_deref(),
                 username.as_ref().unwrap_or(&None).as_deref(),
-            ),
-            AddStudents     { usernames      } => Self::add_students(usernames, context),
-            RemStudents     { usernames      } => Self::remove_students(&usernames, context),
-            AddGraders      { usernames      } => Self::add_graders(usernames, context),
-            RemGraders      { usernames      } => Self::remove_graders(&usernames, context),
-            AddAsgns        { asgn_names      } => Self::add_assignments(asgn_names, context),
-            RemAsgns        { asgn_names      } => Self::remove_assignments(&asgn_names, context),
-            SetDue          { asgn_name, date } => Self::set_due(&asgn_name, &date, context),
-            SetOpen         { asgn_name, date } => Self::set_open(&asgn_name, &date, context),
-            SetClose        { asgn_name, date } => Self::set_close(&asgn_name, &date, context),
-            UnsetDue        { asgn_name       } => Self::unset_due(&asgn_name, context),
-            UnsetOpen       { asgn_name       } => Self::unset_open(&asgn_name, context),
-            UnsetClose      { asgn_name       } => Self::unset_close(&asgn_name, context),
-            Publish         { asgn_name       } => Self::publish(&asgn_name, context),
-            Unpublish       { asgn_name       } => Self::unpublish(&asgn_name, context),
-            Enable          { asgn_name       } => Self::enable(&asgn_name, context),
-            Disable         { asgn_name       } => Self::disable(&asgn_name, context),
-            UpdateScores    { asgn_name       } => Self::update_scores(&asgn_name, context),
-            UpdateAllScores {                 } => Self::update_all_scores(context),
-            GraceTotal      { num             } => Self::grace_total(num, context),
-            GraceLimit      { num             } => Self::grace_limit(num, context),
-            Refresh         {                 } => context.refresh(),
-            Extend          { asgn_name, username, ext } => Self::extend(&asgn_name, &username, ext, context),
-            SetGrace        { asgn_name, username, ext } => StudentAct::grace(&asgn_name, &username, ext, context),
+            )?,
+            AddStudents     { usernames      } => Self::add_students(usernames, context)?,
+            RemStudents     { usernames      } => Self::remove_students(&usernames, context)?,
+            AddGraders      { usernames      } => Self::add_graders(usernames, context)?,
+            RemGraders      { usernames      } => Self::remove_graders(&usernames, context)?,
+            AddAsgns        { asgn_names      } => Self::add_assignments(asgn_names, context)?,
+            RemAsgns        { asgn_names      } => Self::remove_assignments(&asgn_names, context)?,
+            SetDue          { asgn_name, date } => Self::set_due(&asgn_name, &date, context)?,
+            SetOpen         { asgn_name, date } => Self::set_open(&asgn_name, &date, context)?,
+            SetClose        { asgn_name, date } => Self::set_close(&asgn_name, &date, context)?,
+            UnsetDue        { asgn_name       } => Self::unset_due(&asgn_name, context)?,
+            UnsetOpen       { asgn_name       } => Self::unset_open(&asgn_name, context)?,
+            UnsetClose      { asgn_name       } => Self::unset_close(&asgn_name, context)?,
+            Publish         { asgn_name       } => Self::publish(&asgn_name, context)?,
+            Unpublish       { asgn_name       } => Self::unpublish(&asgn_name, context)?,
+            Enable          { asgn_name       } => Self::enable(&asgn_name, context)?,
+            Disable         { asgn_name       } => Self::disable(&asgn_name, context)?,
+            UpdateScores    { asgn_name       } => Self::update_scores(&asgn_name, context)?,
+            UpdateAllScores {                 } => Self::update_all_scores(context)?,
+            GraceTotal      { num             } => Self::grace_total(num, context)?,
+            GraceLimit      { num             } => Self::grace_limit(num, context)?,
+            Refresh         {                 } => context.refresh()?,
+            Extend          { asgn_name, username, ext } => Self::extend(&asgn_name, &username, ext, context)?,
+            SetGrace        { asgn_name, username, ext } => StudentAct::grace(&asgn_name, &username, ext, context)?,
         }
+
+        Ok(())
     }
 }

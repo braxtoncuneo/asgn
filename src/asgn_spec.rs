@@ -12,7 +12,7 @@ use users::get_user_by_uid;
 use toml;
 
 use crate::{
-    fail_info::{FailInfo, FailLog},
+    error::Error,
     context::{Context, Role},
     util,
     table::Table,
@@ -54,11 +54,7 @@ pub struct StatBlockSet {
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-pub struct FatalError;
-
-impl From<FailLog> for FatalError {
-    fn from(_: FailLog) -> Self { Self }
-}
+pub struct SubmissionFatal;
 
 #[derive(Serialize, Deserialize)]
 pub struct AsgnSpecToml {
@@ -145,7 +141,7 @@ pub struct AsgnSpec {
 }
 
 impl AsgnSpec {
-    pub fn from_toml(toml: AsgnSpecToml, path: PathBuf) -> Result<Self, FailLog> {
+    pub fn from_toml(toml: AsgnSpecToml, path: PathBuf) -> Result<Self, Error> {
         let open_date = match toml.open_date {
             Some(date) => Some(util::date_into_chrono(date)?),
             None => None,
@@ -177,45 +173,43 @@ impl AsgnSpec {
         })
     }
 
-    pub fn load(path: impl AsRef<Path>) -> Result<Self, FailLog> {
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, Error> {
         let path = path.as_ref();
         let spec_path = path.join(".info");
         let info_path = spec_path.join("info.toml");
 
         let info_text = fs::read_to_string(info_path).map_err(|err|
-            FailInfo::NoSpec(
+            Error::NoSpec(
                 path.file_name().map(|os| os.to_str().unwrap())
                     .unwrap_or("assignment").to_owned(),
                 err.to_string()
-            ).into_log()
+            )
         )?;
 
         let spec_toml: AsgnSpecToml = toml::from_str(&info_text).map_err(|err|
-            FailInfo::BadSpec("assignment".to_owned(), err.to_string()).into_log()
+            Error::BadSpec("assignment".to_owned(), err.to_string())
         )?;
 
         let spec = Self::from_toml(spec_toml, path.to_owned())?;
 
         if !path.ends_with(&spec.name) {
-            return Err(FailInfo::BadSpec(
+            return Err(Error::BadSpec(
                 "assignment".to_owned(),
                 String::from("Name field does not match assignment directory name.")
-            ).into());
+            ));
         }
 
         Ok(spec)
     }
 
-    pub fn sync(&self) -> Result<(), FailLog>{
-        use FailInfo::*;
+    pub fn sync(&self) -> Result<(), Error>{
+        use Error::*;
 
         let spec_toml = AsgnSpecToml::from(self);
 
-        let toml_text = toml::to_string(&spec_toml)
-            .map_err(|err| IOFail(format!(
-                "Could not serialize course spec : {}",
-                err
-            )).into_log())?;
+        let toml_text = toml::to_string(&spec_toml).map_err(|err|
+            IOFail(format!("Could not serialize course spec: {err}"))
+        )?;
 
         util::write_file(
             self.path.join(".info").join("info.toml"),
@@ -237,7 +231,7 @@ impl AsgnSpec {
         }).unwrap_or(false)
     }
 
-    pub fn details(&self, context: &Context) -> Result<Table, FailLog> {
+    pub fn details(&self, context: &Context) -> Result<Table, Error> {
         let sub_dir = context.base_path.join(&self.name).join(&context.username);
 
         let slot = SubmissionSlot {
@@ -298,7 +292,7 @@ impl AsgnSpec {
         cmd
     }
 
-    pub fn run_rule(&self, context: &Context, rule: &Rule, path: &Path) -> Result<bool, FatalError> {
+    pub fn run_rule(&self, context: &Context, rule: &Rule, path: &Path) -> Result<bool, SubmissionFatal> {
         let wait_text = rule.wait_text.as_ref()
             .unwrap_or(&format!("Executing '{}'.", &rule.target))
             .yellow().bold();
@@ -315,7 +309,7 @@ impl AsgnSpec {
         cmd.stdout(Stdio::inherit());
         cmd.stderr(Stdio::inherit());
 
-        let status = util::run_at(cmd, path, false)?;
+        let status = util::run_at(cmd, path, false).map_err(|_| SubmissionFatal)?;
 
         if status.success() {
             let pass_text = rule.pass_text.clone()
@@ -339,7 +333,7 @@ impl AsgnSpec {
                 if let Some(help) = help_text {
                     println!("{}", format!("> {}", help).yellow());
                 }
-                Err(FatalError)
+                Err(SubmissionFatal)
             } else {
                 println!("{fail_text}");
                 if let Some(help) = help_text {
@@ -376,7 +370,7 @@ impl AsgnSpec {
         ruleset: Option<&Ruleset>,
         path: &Path,
         is_metric: bool,
-    ) -> Result<toml::value::Table, FatalError>
+    ) -> Result<toml::value::Table, SubmissionFatal>
     {
         let mut scores = toml::value::Table::default();
 
@@ -406,7 +400,7 @@ impl AsgnSpec {
                         failed += 1;
                     }
                 },
-                Err(FatalError) => {
+                Err(SubmissionFatal) => {
                     failed += 1;
                     fatal = true;
                     break;
@@ -415,8 +409,8 @@ impl AsgnSpec {
 
             if did_pass && is_metric {
                 let result = fs::read_to_string(path.join(&rule.target)).map_err(|err|
-                    FailInfo::IOFail(format!("Failed to read score: '{err}'")
-                ).into_log());
+                    Error::IOFail(format!("Failed to read score: '{err}'")
+                ));
 
                 match (rule.kind.as_ref(), result) {
                     (Some(kind), Ok(result)) => Self::log_metric(&mut scores, &rule.target, &result, kind),
@@ -433,12 +427,11 @@ impl AsgnSpec {
         println!("! {count} total targets - {passed} passed, {failed} failed, {not_reached} not reached.");
 
         if fatal {
-            return Err(FatalError);
+            return Err(SubmissionFatal);
         }
 
         Ok(scores)
     }
-
 
     pub fn run_on_submit(
         &self,
@@ -447,7 +440,7 @@ impl AsgnSpec {
         path: &Path,
         title: &str,
         is_metric: bool,
-    ) -> Option<Result<toml::value::Table, FatalError>>
+    ) -> Option<Result<toml::value::Table, SubmissionFatal>>
     {
         match ruleset {
             Some(Ruleset { on_submit: Some(true) | None, .. }) => {
@@ -466,7 +459,7 @@ impl AsgnSpec {
         path: &Path,
         title: &str,
         is_metric: bool,
-    ) -> Option<Result<toml::value::Table, FatalError>>
+    ) -> Option<Result<toml::value::Table, SubmissionFatal>>
     {
         match ruleset {
             Some(Ruleset { on_grade: Some(true) | None, .. }) => {
@@ -478,23 +471,23 @@ impl AsgnSpec {
         }
     }
 
-    pub fn retrieve_sub(&self, dst_dir: &Path, username: &str) -> Result<(), FailLog> {
+    pub fn retrieve_sub(&self, dst_dir: &Path, username: &str) -> Result<(), Error> {
         let sub_path = self.path.join(username);
 
         if dst_dir.is_dir() {
             fs::remove_dir_all(dst_dir).map_err(|err|
-                FailInfo::IOFail(format!("could not remove directory {}: {}", dst_dir.display(), err)).into_log()
+                Error::IOFail(format!("could not remove directory {}: {}", dst_dir.display(), err))
             )?;
         }
 
         if dst_dir.is_file() {
             fs::remove_file(dst_dir).map_err(|err|
-                FailInfo::IOFail(format!("could not remove file {}: {}", dst_dir.display(), err)).into_log()
+                Error::IOFail(format!("could not remove file {}: {}", dst_dir.display(), err))
             )?;
         }
 
         fs::create_dir(dst_dir).map_err(|err|
-            FailInfo::IOFail(format!("could not create directory {}: {}", dst_dir.display(), err)).into_log()
+            Error::IOFail(format!("could not create directory {}: {}", dst_dir.display(), err))
         )?;
 
         for file_name in &self.file_list {
@@ -505,24 +498,23 @@ impl AsgnSpec {
             }
 
             if !src_path.exists() {
-                return Err(FailInfo::Custom(
+                return Err(Error::Custom(
                     format!("could not copy file {} to {}", src_path.display(), dst_path.display()),
                     "File does not exist in the submission directory.".to_owned(),
-                ).into_log());
+                ));
             }
 
             fs::copy(&src_path, &dst_path).map_err(|err|
-                FailInfo::IOFail(format!(
+                Error::IOFail(format!(
                     "could not copy file {} to {}: {}",
                     src_path.display(), dst_path.display(), err,
-                )).into_log()
+                ))
             )?;
         }
 
         Ok(())
     }
 }
-
 
 pub struct SubmissionSlot <'ctx> {
     pub context: &'ctx Context,
@@ -561,32 +553,32 @@ impl<'ctx> SubmissionSlot<'ctx> {
             .map(|name| self.base_path.join(name))
     }
 
-    pub fn get_grace(&self) -> Result<i64, FailLog> {
+    pub fn get_grace(&self) -> Result<i64, Error> {
         let toml_text = match fs::read_to_string(self.grace_path()) {
             Ok(toml_text) => toml_text,
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(0),
-            Err(err) => return Err(FailInfo::IOFail(format!("reading grace file: {err}")).into_log()),
+            Err(err) => return Err(Error::IOFail(format!("reading grace file: {err}"))),
         };
 
         let grace: GraceToml = toml::from_str(&toml_text).map_err(|err|
-            FailInfo::IOFail(format!("deserializing grace file: {err}")).into_log()
+            Error::IOFail(format!("deserializing grace file: {err}"))
         )?;
 
         Ok(grace.value)
     }
 
-    pub fn set_grace(&self, value: i64) -> Result<(), FailLog> {
+    pub fn set_grace(&self, value: i64) -> Result<(), Error> {
         let grace_toml = GraceToml { value };
         let toml_text = toml::to_string(&grace_toml).map_err(|err|
-            FailInfo::IOFail(format!("serializing grace file: {err}")).into_log()
+            Error::IOFail(format!("serializing grace file: {err}"))
         )?;
         fs::write(self.grace_path(), toml_text).map_err(|err|
-            FailInfo::IOFail(format!("writing grace file: {err}")).into_log()
+            Error::IOFail(format!("writing grace file: {err}"))
         )?;
         Ok(())
     }
 
-    pub fn get_extension(&self) -> Result<i64, FailLog> {
+    pub fn get_extension(&self) -> Result<i64, Error> {
         let ext_path = self.extension_path();
 
         if !ext_path.exists() || ext_path.is_dir() {
@@ -594,50 +586,50 @@ impl<'ctx> SubmissionSlot<'ctx> {
         }
 
         let owner_uid = fs::metadata(&ext_path)
-            .map_err(|err| FailInfo::IOFail(err.to_string()))?.uid();
+            .map_err(|err| Error::IOFail(err.to_string()))?.uid();
 
         let owner = get_user_by_uid(owner_uid)
-            .ok_or(FailInfo::InvalidUID(owner_uid))?
+            .ok_or(Error::InvalidUID(owner_uid))?
             .name().to_str().unwrap()
             .to_owned();
 
         if owner != self.context.instructor {
-            return Err(FailInfo::IOFail(format!(
+            return Err(Error::IOFail(format!(
                 "Extension file at {} was not made by instructor!",
                 ext_path.display(),
-            )).into());
+            )));
         }
 
         let toml_text = fs::read_to_string(ext_path).map_err(|err|
-            FailInfo::IOFail(format!("reading extension file: {err}")).into_log()
+            Error::IOFail(format!("reading extension file: {err}"))
         )?;
 
         let ext: ExtensionToml = toml::from_str(&toml_text).map_err(|err|
-            FailInfo::IOFail(format!("deserializing extension file: {err}")).into_log()
+            Error::IOFail(format!("deserializing extension file: {err}"))
         )?;
 
         Ok(ext.value)
     }
 
-    pub fn set_extension(&self, value: i64) -> Result<(), FailLog> {
+    pub fn set_extension(&self, value: i64) -> Result<(), Error> {
         let ext_toml = ExtensionToml { value };
         let toml_text = toml::to_string(&ext_toml).map_err(|err|
-            FailInfo::IOFail(format!("serializing extension file: {err}")).into_log()
+            Error::IOFail(format!("serializing extension file: {err}"))
         )?;
         fs::write(self.extension_path(), toml_text).map_err(|err|
-            FailInfo::IOFail(format!("writing extension file: {err}")).into_log()
+            Error::IOFail(format!("writing extension file: {err}"))
         )?;
         Ok(())
     }
 
-    pub fn status(&self) -> Result<SubmissionStatus, FailLog> {
+    pub fn status(&self) -> Result<SubmissionStatus, Error> {
         let submitted = self.file_paths().all(|p| p.is_file());
 
         let time: Option<i64> = if submitted {
             let mut mtime: i64 = 0;
             for path in self.file_paths() {
                 let meta = fs::metadata(path).map_err(|err|{
-                    FailInfo::IOFail(err.kind().to_string()).into_log()
+                    Error::IOFail(err.kind().to_string())
                 })?;
                 mtime = mtime.max(meta.mtime());
             }
@@ -649,7 +641,7 @@ impl<'ctx> SubmissionSlot<'ctx> {
         let turn_in_time = if let Some(seconds) = time {
             let turn_in = Local.timestamp_opt(seconds, 0)
                 .earliest()
-                .ok_or(FailInfo::IOFail("Impossible time conversion".to_owned()).into_log())?;
+                .ok_or(Error::IOFail("Impossible time conversion".to_owned()))?;
             Some(turn_in)
         } else {
             None
@@ -662,7 +654,6 @@ impl<'ctx> SubmissionSlot<'ctx> {
         })
     }
 }
-
 
 impl SubmissionStatus {
     pub fn time_past(&self, time: &DateTime<Local>) -> Option<Duration> {

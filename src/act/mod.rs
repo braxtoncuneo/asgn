@@ -3,8 +3,8 @@ pub mod grader;
 pub mod student;
 pub mod other;
 
-use crate::{fail_info::FailLog, context::Context};
+use crate::{error::ErrorLog, context::Context};
 
 trait Action {
-    fn execute(&self, context: &Context) -> Result<(), FailLog>;
+    fn execute(&self, context: &Context) -> Result<(), ErrorLog>;
 }
