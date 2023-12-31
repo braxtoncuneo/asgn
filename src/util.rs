@@ -17,17 +17,17 @@ use colored::Colorize;
 use walkdir::WalkDir;
 use chrono::{TimeZone, Datelike, Timelike};
 
-pub fn print_hline() {
-    match terminal_size() {
-        Ok((w, _)) => println!("{:-<1$}", "", w as usize),
-        Err(_) => println!(),
-    }
-}
+pub enum Hline { Normal, Bold }
 
-pub fn print_bold_hline () {
-    match terminal_size() {
-        Ok((w, _)) => println!("{}", format!("{:=<1$}", "", w as usize).bold()),
-        Err(_) => println!(),
+impl fmt::Display for Hline {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match terminal_size() {
+            Ok((width, _)) => match self {
+                Self::Normal => write!(f, "{:-<1$}", "", width as usize),
+                Self::Bold => write!(f, "{}", format!("{:=<1$}", "", width as usize).bold()),
+            }
+            Err(_) => Ok(()),
+        }
     }
 }
 

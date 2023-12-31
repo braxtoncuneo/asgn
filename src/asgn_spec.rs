@@ -2,7 +2,8 @@ use std::{
     fs,
     path::{PathBuf, Path},
     process::Stdio,
-    os::unix::fs::MetadataExt, io,
+    os::unix::fs::MetadataExt,
+    io,
 };
 
 use itertools::Itertools;
@@ -379,7 +380,7 @@ impl AsgnSpec {
 
         for mut rule in ruleset.rules.iter().cloned() {
             rule.fail_okay.get_or_insert(ruleset.fail_okay.unwrap_or(false));
-            util::print_hline();
+            println!("{}", util::Hline::Normal);
             let mut did_pass: bool = false;
 
             match self.run_rule(context, &rule, path) {
@@ -413,7 +414,7 @@ impl AsgnSpec {
         if fatal {
             println!("{}", format!("! {}", "Execution cannot continue beyond this error.").red());
         }
-        util::print_hline();
+        println!("{}", util::Hline::Normal);
         let not_reached = count-passed-failed;
         println!("! {count} total targets - {passed} passed, {failed} failed, {not_reached} not reached.");
 
@@ -435,7 +436,7 @@ impl AsgnSpec {
     {
         match ruleset {
             Some(Ruleset { on_submit: Some(true) | None, .. }) => {
-                util::print_bold_hline();
+                println!("{}", util::Hline::Bold);
                 println!("{}", title.yellow().bold());
                 Some(self.run_ruleset(context, ruleset, path, is_metric))
             }
@@ -454,7 +455,7 @@ impl AsgnSpec {
     {
         match ruleset {
             Some(Ruleset { on_grade: Some(true) | None, .. }) => {
-                util::print_bold_hline();
+                println!("{}", util::Hline::Bold);
                 println!("{}", title.yellow().bold());
                 Some(self.run_ruleset(context, ruleset, path, is_metric))
             }
