@@ -100,11 +100,11 @@ impl GraderAct {
             return Ok(());
         }
 
-        util::print_bold_hline();
+        println!("{}", util::Hline::Bold);
         println!("{}", "Evaluating Grades".yellow().bold());
         let _ = spec.run_ruleset(context, spec.grade.as_ref(), &cwd, true);
 
-        util::print_bold_hline();
+        println!("{}", util::Hline::Bold);
 
         Ok(())
     }
@@ -112,11 +112,11 @@ impl GraderAct {
     fn check(asgn_name: &str, context: &Context) -> Result<(), Error> {
         let spec = context.catalog_get(asgn_name)?;
 
-        util::print_bold_hline();
+        println!("{}", util::Hline::Bold);
         println!("{}", "Evaluating Checks".yellow().bold());
         let cwd = context.cwd.clone();
         let _ = spec.run_ruleset(context, spec.check.as_ref(), &cwd, true);
-        util::print_bold_hline();
+        println!("{}", util::Hline::Bold);
 
         Ok(())
     }
@@ -124,11 +124,11 @@ impl GraderAct {
     fn score(asgn_name: &str, context: &Context) -> Result<(), Error> {
         let spec = context.catalog_get(asgn_name)?;
 
-        util::print_bold_hline();
+        println!("{}", util::Hline::Bold);
         println!("{}", "Evaluating Scores".yellow().bold());
         let cwd = context.cwd.clone();
         let _ = spec.run_ruleset(context, spec.score.as_ref(), &cwd, true);
-        util::print_bold_hline();
+        println!("{}", util::Hline::Bold);
 
         Ok(())
     }
@@ -154,7 +154,7 @@ impl GraderAct {
         if score_result == Some(Err(SubmissionFatal)) {
             return Ok(());
         }
-        util::print_bold_hline();
+        println!("{}", util::Hline::Bold);
 
         Ok(())
     }
@@ -167,9 +167,9 @@ impl GraderAct {
         for member_name in &context.members {
             println!("{}", format!("Retrieving Submission for '{member_name}'").bold());
             if let Err(err) = Self::copy(asgn_name, member_name, Some(&dst_dir), context) {
-                util::print_bold_hline();
+                println!("{}", util::Hline::Bold);
                 print!("{err}");
-                util::print_bold_hline();
+                println!("{}", util::Hline::Bold);
             }
         }
         Ok(())

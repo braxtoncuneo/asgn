@@ -314,7 +314,7 @@ impl StudentAct {
         }
         log.into_result()?;
 
-        util::print_bold_hline();
+        println!("{}", util::Hline::Bold);
         println!("{}", format!("Assignment '{asgn_name}' submitted!").green());
 
         let build_result = spec.run_on_submit(
@@ -350,7 +350,7 @@ impl StudentAct {
             return Ok(());
         }
 
-        util::print_bold_hline();
+        println!("{}", util::Hline::Bold);
         Ok(())
     }
 
