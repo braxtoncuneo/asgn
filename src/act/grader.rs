@@ -7,10 +7,8 @@ use crate::{
     asgn_spec::{AsgnSpec, SubmissionFatal},
     context::Context,
     error::{ErrorLog, Error},
-    util,
+    util::{self, color::{FG_YELLOW, TEXT_BOLD, STYLE_RESET}},
 };
-
-use colored::Colorize;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -100,11 +98,11 @@ impl GraderAct {
             return Ok(());
         }
 
-        util::print_bold_hline();
-        println!("{}", "Evaluating Grades".yellow().bold());
+        println!("{}", util::Hline::Bold);
+        println!("{FG_YELLOW}{TEXT_BOLD}Evaluating Grades{STYLE_RESET}");
         let _ = spec.run_ruleset(context, spec.grade.as_ref(), &cwd, true);
 
-        util::print_bold_hline();
+        println!("{}", util::Hline::Bold);
 
         Ok(())
     }
@@ -112,11 +110,11 @@ impl GraderAct {
     fn check(asgn_name: &str, context: &Context) -> Result<(), Error> {
         let spec = context.catalog_get(asgn_name)?;
 
-        util::print_bold_hline();
-        println!("{}", "Evaluating Checks".yellow().bold());
+        println!("{}", util::Hline::Bold);
+        println!("{FG_YELLOW}{TEXT_BOLD}Evaluating Checks{STYLE_RESET}");
         let cwd = context.cwd.clone();
         let _ = spec.run_ruleset(context, spec.check.as_ref(), &cwd, true);
-        util::print_bold_hline();
+        println!("{}", util::Hline::Bold);
 
         Ok(())
     }
@@ -124,11 +122,11 @@ impl GraderAct {
     fn score(asgn_name: &str, context: &Context) -> Result<(), Error> {
         let spec = context.catalog_get(asgn_name)?;
 
-        util::print_bold_hline();
-        println!("{}", "Evaluating Scores".yellow().bold());
+        println!("{}", util::Hline::Bold);
+        println!("{FG_YELLOW}{TEXT_BOLD}Evaluating Scores{STYLE_RESET}");
         let cwd = context.cwd.clone();
         let _ = spec.run_ruleset(context, spec.score.as_ref(), &cwd, true);
-        util::print_bold_hline();
+        println!("{}", util::Hline::Bold);
 
         Ok(())
     }
@@ -154,7 +152,7 @@ impl GraderAct {
         if score_result == Some(Err(SubmissionFatal)) {
             return Ok(());
         }
-        util::print_bold_hline();
+        println!("{}", util::Hline::Bold);
 
         Ok(())
     }
@@ -165,11 +163,11 @@ impl GraderAct {
         );
         util::refresh_dir(&dst_dir, 0o700, Vec::new().iter())?;
         for member_name in &context.members {
-            println!("{}", format!("Retrieving Submission for '{member_name}'").bold());
+            println!("{TEXT_BOLD}Retrieving Submission for '{member_name}'{STYLE_RESET}");
             if let Err(err) = Self::copy(asgn_name, member_name, Some(&dst_dir), context) {
-                util::print_bold_hline();
+                println!("{}", util::Hline::Bold);
                 print!("{err}");
-                util::print_bold_hline();
+                println!("{}", util::Hline::Bold);
             }
         }
         Ok(())

@@ -1,5 +1,4 @@
 use structopt::StructOpt;
-use colored::Colorize;
 use super::other::OtherAct;
 use util::bashrc_append_line;
 
@@ -9,7 +8,7 @@ use crate::{
     asgn_spec::{AsgnSpec, Ruleset, StatBlockSet, SubmissionFatal},
     context::{Context, Role},
     error::{Error, ErrorLog},
-    util,
+    util::{self, color::{FG_GREEN, STYLE_RESET, FG_YELLOW}},
     table::Table,
 };
 
@@ -314,8 +313,8 @@ impl StudentAct {
         }
         log.into_result()?;
 
-        util::print_bold_hline();
-        println!("{}", format!("Assignment '{asgn_name}' submitted!").green());
+        println!("{}", util::Hline::Bold);
+        println!("{FG_GREEN}Assignment '{asgn_name}' submitted!{STYLE_RESET}");
 
         let build_result = spec.run_on_submit(
             context,
@@ -350,7 +349,7 @@ impl StudentAct {
             return Ok(());
         }
 
-        util::print_bold_hline();
+        println!("{}", util::Hline::Bold);
         Ok(())
     }
 
@@ -412,10 +411,12 @@ impl StudentAct {
             context.base_path.display(),
         );
         bashrc_append_line(&line)?;
-        println!("{}", "Alias installed successfully.".yellow());
-        println!("{}", "The alias will take effect automatically for future shell sessions.".yellow());
-        println!("{}", "\nTo have it take effect for this shell session, run this command:".yellow());
-        println!("{}", "\n\nsource ~/.bashrc\n\n".green());
+        println!(
+"{FG_YELLOW}Alias installed successfully.
+The alias will be present in future shell sessions.
+
+To import it for this shell session, run the command:
+  {FG_GREEN}source ~/.bashrc{STYLE_RESET}");
 
         Ok(())
     }

@@ -2,7 +2,8 @@ use std::{
     fs,
     path::{PathBuf, Path},
     process::Stdio,
-    os::unix::fs::MetadataExt, io,
+    os::unix::fs::MetadataExt,
+    io,
 };
 
 use itertools::Itertools;
@@ -14,11 +15,9 @@ use toml;
 use crate::{
     error::Error,
     context::{Context, Role},
-    util,
+    util::{self, color::{FG_YELLOW, TEXT_BOLD, STYLE_RESET, FG_GREEN, FG_RED}},
     table::Table,
 };
-
-use colored::Colorize;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Rule {
@@ -284,10 +283,12 @@ impl AsgnSpec {
     }
 
     pub fn run_rule(&self, context: &Context, rule: &Rule, path: &Path) -> Result<bool, SubmissionFatal> {
-        let wait_text = rule.wait_text.as_ref()
-            .unwrap_or(&format!("Executing '{}'.", &rule.target))
-            .yellow().bold();
-        println!("{wait_text}");
+        print!("{FG_YELLOW}{TEXT_BOLD}");
+        match &rule.wait_text {
+            Some(text) => print!("{text}"),
+            None => print!("Executing '{}'.", &rule.target),
+        }
+        println!("{STYLE_RESET}");
 
         let quiet = match context.role {
             Role::Instructor => false,
@@ -303,11 +304,13 @@ impl AsgnSpec {
         let status = util::run_at(cmd, path, false).map_err(|_| SubmissionFatal)?;
 
         if status.success() {
-            let pass_text = rule.pass_text.clone()
-                .unwrap_or(format!("'{}' passed.", &rule.target));
-            let pass_text = format!("! {}", pass_text).green();
+            print!("{FG_GREEN}! ");
+            match &rule.pass_text {
+                Some(text) => print!("{text}"),
+                None => print!("'{}' passed.", &rule.target),
+            }
+            println!("{STYLE_RESET}");
 
-            println!("{pass_text}");
             let target = path.join(&rule.target);
             if target.exists() {
                 let _ = util::refresh_file(target, 0o777, "");
@@ -315,22 +318,20 @@ impl AsgnSpec {
 
             Ok(true)
         } else {
-            let fail_text = rule.fail_text.clone().unwrap_or_else(|| format!("'{}' failed.", &rule.target));
-            let fail_text = format!("! {}", fail_text).red();
-            let help_text = rule.help_text.as_ref().map(|t|t.yellow().to_string());
+            print!("{FG_RED}! ");
+            match &rule.fail_text {
+                Some(text) => print!("{text}"),
+                _ => print!("'{}' failed.", &rule.target),
+            }
+            println!();
 
-            if rule.fail_okay != Some(true) {
-                println!("{fail_text}");
-                if let Some(help) = help_text {
-                    println!("{}", format!("> {}", help).yellow());
-                }
-                Err(SubmissionFatal)
-            } else {
-                println!("{fail_text}");
-                if let Some(help) = help_text {
-                    println!("{}", format!("> {}", help).yellow());
-                }
-                Ok(false)
+            if let Some(help) = &rule.help_text {
+                println!("{FG_YELLOW}> {help}{STYLE_RESET}");
+            }
+
+            match rule.fail_okay {
+                Some(true) => Ok(false),
+                _ => Err(SubmissionFatal),
             }
         }
     }
@@ -341,18 +342,18 @@ impl AsgnSpec {
             "int"   => result.parse::<i64 >().map(toml::Value::Integer).ok(),
             "float" => result.parse::<f64 >().map(toml::Value::Float  ).ok(),
             _ => {
-                println!("{}", format!("! Metric '{target}' has invalid kind '{kind}'").red());
+                println!("{FG_RED}! Metric '{target}' has invalid kind '{kind}'{STYLE_RESET}");
                 return;
             },
         };
 
         let Some(score) = score else {
-            println!("{}", format!("Metric '{target}' had result '{result}' which failed to parse into '{kind}'").red());
+            println!("{FG_RED}Metric '{target}' had result '{result}' which failed to parse into '{kind}'{STYLE_RESET}");
             return;
         };
 
         scores.insert(target.to_string(), score);
-        println!("{}", format!("Metric '{target}' had value '{result}'").yellow().bold());
+        println!("{FG_YELLOW}Metric '{target}' had value '{result}'{STYLE_RESET}");
     }
 
     pub fn run_ruleset(
@@ -366,7 +367,7 @@ impl AsgnSpec {
         let mut scores = toml::value::Table::default();
 
         if ruleset.is_none() {
-            println!("{}", "No targets.".yellow());
+            println!("{FG_YELLOW}No targets.{STYLE_RESET}");
             return Ok(scores)
         }
 
@@ -379,7 +380,7 @@ impl AsgnSpec {
 
         for mut rule in ruleset.rules.iter().cloned() {
             rule.fail_okay.get_or_insert(ruleset.fail_okay.unwrap_or(false));
-            util::print_hline();
+            println!("{}", util::Hline::Normal);
             let mut did_pass: bool = false;
 
             match self.run_rule(context, &rule, path) {
@@ -405,15 +406,16 @@ impl AsgnSpec {
 
                 match (rule.kind.as_ref(), result) {
                     (Some(kind), Ok(result)) => Self::log_metric(&mut scores, &rule.target, &result, kind),
-                    (None, Ok(_result)) => println!("{}", format!("! Metric '{}' has no kind.", rule.target).red()),
+                    (None, Ok(_)) => println!("{FG_RED}! Metric{STYLE_RESET} '{}' {FG_RED}has no kind.{STYLE_RESET}", rule.target),
                     (_, Err(log)) => print!("{log}"),
                 }
             }
         }
+
         if fatal {
-            println!("{}", format!("! {}", "Execution cannot continue beyond this error.").red());
+            println!("{FG_RED}! Execution cannot continue beyond this error.{STYLE_RESET}");
         }
-        util::print_hline();
+        println!("{}", util::Hline::Normal);
         let not_reached = count-passed-failed;
         println!("! {count} total targets - {passed} passed, {failed} failed, {not_reached} not reached.");
 
@@ -435,8 +437,8 @@ impl AsgnSpec {
     {
         match ruleset {
             Some(Ruleset { on_submit: Some(true) | None, .. }) => {
-                util::print_bold_hline();
-                println!("{}", title.yellow().bold());
+                println!("{}", util::Hline::Bold);
+                println!("{FG_YELLOW}{TEXT_BOLD}{title}{STYLE_RESET}");
                 Some(self.run_ruleset(context, ruleset, path, is_metric))
             }
             _ => None,
@@ -454,8 +456,8 @@ impl AsgnSpec {
     {
         match ruleset {
             Some(Ruleset { on_grade: Some(true) | None, .. }) => {
-                util::print_bold_hline();
-                println!("{}", title.yellow().bold());
+                println!("{}", util::Hline::Bold);
+                println!("{FG_YELLOW}{TEXT_BOLD}{title}{STYLE_RESET}");
                 Some(self.run_ruleset(context, ruleset, path, is_metric))
             }
             _ => None,
