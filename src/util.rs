@@ -85,6 +85,10 @@ pub fn set_facl<'facl>(
 {
     let entry_string = entries.join(",");
 
+    if entry_string.is_empty() {
+        return Ok(());
+    }
+
     let mut cmd = std::process::Command::new("setfacl");
 
     if default {
@@ -92,7 +96,7 @@ pub fn set_facl<'facl>(
     }
 
     cmd.arg("-m");
-    cmd.arg(entry_string).arg(path.as_ref());
+    cmd.arg(entry_string.clone()).arg(path.as_ref());
 
     let output = cmd.output().map_err(|err|
         Error::IOFail(format!("fusing setfacl: {err}"))
