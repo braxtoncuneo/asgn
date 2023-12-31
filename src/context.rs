@@ -371,23 +371,20 @@ impl Context {
             else if asgn.after_close() { "AFTER CLOSE" }
             else { "ENABLED" };
 
-        let naive_due_date = match asgn.due_date {
-            None => "NONE".to_owned(),
-            Some(due) => {
-                let date = due.date_naive();
-                match due.time() {
-                    DEFAULT_DUE_TIME => date.to_string(),
-                    time => format!("{date} {time}"),
-                }
+        let naive_due_date = asgn.due_date.map(|due| {
+            let date = due.date_naive();
+            match due.time() {
+                DEFAULT_DUE_TIME => date.to_string(),
+                time => format!("{date} {time}"),
             }
-        };
+        });
 
         vec![
             asgn.name.clone(),
             status.to_string(),
             active.to_string(),
             visible.to_string(),
-            naive_due_date,
+            Table::option_repr(naive_due_date),
             asgn.file_list.iter().join("  "),
         ]
     }
@@ -432,32 +429,27 @@ impl Context {
             else if asgn.after_close() { "AFTER CLOSE" }
             else { "ENABLED" };
 
-        let naive_due_date = match due_date {
-            None => "NONE".to_owned(),
-            Some(due) => {
-                let date = due.date_naive();
-                match due.time() {
-                    DEFAULT_DUE_TIME => due.to_string(),
-                    time => format!("{date} {time}"),
-                }
+        let naive_due_date = due_date.map(|due| {
+            let date = due.date_naive();
+            match due.time() {
+                DEFAULT_DUE_TIME => due.to_string(),
+                time => format!("{date} {time}"),
             }
-        };
+        });
 
         Ok(vec![
             asgn.name.clone(),
             active.to_owned(),
-            naive_due_date,
+            Table::option_repr(naive_due_date),
             lateness,
             asgn.file_list.iter().join("  ")
         ])
     }
 
     pub fn list_subs(&self, asgn: Option<&str>, username: Option<&str>) -> Result<(), Error> {
-        let header: Vec<String> = ["ASSIGNMENT", "USER", "SUBMISSION STATUS", "EXTENSION", "GRACE"]
-            .into_iter().map(str::to_owned).collect();
+        let header = ["ASSIGNMENT", "USER", "SUBMISSION STATUS", "EXTENSION", "GRACE"].map(str::to_owned);
 
-        let mut table = Table::new(header.len());
-        table.add_row(header)?;
+        let mut table = Table::new(header);
 
         let asgn_names: Vec<_> = match asgn {
             Some(asgn_name) => {
@@ -479,16 +471,12 @@ impl Context {
             None => self.members.iter().map(String::as_str).collect(),
         };
 
-        let body: Vec<Vec<String>> = asgn_names.iter()
+        table.extend(asgn_names.iter()
             .filter_map(|&asgn_name| self.catalog.get(asgn_name) )
             .filter_map(|asgn| asgn.as_ref().ok())
             .cartesian_product(usernames.iter())
             .map(|(asgn, username)| self.submission_summary_row(asgn, username))
-            .collect();
-
-        for row in body {
-            table.add_row(row)?;
-        }
+        )?;
 
         print!("{table}");
 
@@ -496,21 +484,15 @@ impl Context {
     }
 
     pub fn list_asgns(&self) -> Result<(), Error> {
-        let header: Vec<String> = ["NAME", "STATUS", "ACTIVE", "VISIBLE", "DUE", "FILES"].into_iter()
-            .map(str::to_owned)
-            .collect();
+        let header = ["NAME", "STATUS", "ACTIVE", "VISIBLE", "DUE", "FILES"].map(str::to_owned);
 
-        let mut table = Table::new(header.len());
-        table.add_row(header)?;
+        let mut table = Table::new(header);
 
-        let body = self.manifest.iter()
+        table.extend(self.manifest.iter()
             .filter_map(|name| self.catalog.get(name) )
             .filter_map(|asgn| asgn.as_ref().ok() )
-            .map(|asgn| self.assignment_summary_row(asgn));
-
-        for row in body {
-            table.add_row(row)?;
-        }
+            .map(|asgn| self.assignment_summary_row(asgn))
+        )?;
 
         print!("{table}");
 
@@ -518,28 +500,19 @@ impl Context {
     }
 
     pub fn summary(&self) -> Result<(), Error> {
-        let header = ["ASSIGNMENT", "STATUS", "DUE DATE", "SUBMISSION STATUS", "FILES"].map(str::to_owned);
+        let mut table = Table::new(["ASSIGNMENT", "STATUS", "DUE DATE", "SUBMISSION STATUS", "FILES"].map(str::to_owned));
 
-        let mut table = Table::new(header.len());
-        table.add_row(header)?;
-
-        let body = self.manifest.iter()
+        table.extend(self.manifest.iter()
             .filter_map(|name| self.catalog.get(name) )
             .filter_map(|asgn| asgn.as_ref().ok() )
             .filter(|asgn| asgn.visible)
             .map(|asgn| self.normal_summary_row(asgn, &self.username))
-            .filter_map(|row| row.ok());
-
-        for row in body {
-            table.add_row(row)?;
-        }
+            .filter_map(|row| row.ok())
+        )?;
 
         if self.grace_total.unwrap_or_default() != 0 {
             print!("TOTAL GRACE: {}    ", self.grace_total.unwrap_or_default());
-            print!("GRACE LIMIT: {}    ", self.grace_limit
-                .map(|limit| limit.to_string())
-                .unwrap_or("NONE".to_owned())
-            );
+            print!("GRACE LIMIT: {}    ", Table::option_repr(self.grace_limit.as_ref()));
             println!("GRACE SPENT: {}", self.grace_spent());
         }
 

@@ -196,35 +196,35 @@ impl StudentAct {
         let score_names : Vec<String> = ruleset.rules.iter().map(|r|r.target.clone()).collect();
         let mut header: Vec<String> = vec!["User".to_owned()];
         header.extend(score_names.iter().cloned());
-        let mut table: Table = Table::new(header.len());
-        table.add_row(header.clone())?;
+        let row_width = header.len();
+        let mut table: Table = Table::new(header);
 
-        let mut rows: Vec<(Option<T>, Vec<Option<String>>)> = Vec::new();
+        let mut rows: Vec<(Option<T>, Vec<String>)> = Vec::new();
 
         let base_path = asgn.path.join(".info").join("score.toml");
         let scores = util::parse_from::<StatBlockSet>(&base_path)?;
 
         for member in &context.members {
-            let member_name = member.clone();
-            let mut row = vec![Some(member.clone())];
-            let stat_block = scores.get_block(&member_name);
+            let mut row = vec![member.clone()];
+            let stat_block = scores.get_block(member);
 
             let Some(stat_block) = stat_block else {
-                row.resize_with(header.len(), || None);
+                row.resize_with(row_width, || Table::NONE_REPR.to_owned());
                 continue;
             };
 
             let score: Option<T> = stat_block.scores.get(rule_name)
                 .map(|toml_val|
                     T::from_str(&toml_val.to_string()).map_err(|err|
-                        Error::IOFail(format!("Failed to parse score {rule_name} for user {member_name}: {err}"))
+                        Error::IOFail(format!("Failed to parse score {rule_name} for user {member}: {err}"))
                     )
                 )
                 .transpose()?;
 
-            for rule in &ruleset.rules {
-                row.push(stat_block.scores.get(&rule.target).map(toml::Value::to_string));
-            }
+            row.extend(ruleset.rules.iter()
+                .map(|rule| stat_block.scores.get(&rule.target))
+                .map(Table::option_repr)
+            );
 
             rows.push((score, row));
         }
@@ -241,13 +241,7 @@ impl StudentAct {
             }
         });
 
-        for (_, row) in rows.into_iter() {
-            let row_text: Vec<_> = row.into_iter()
-                .map(|entry| entry.unwrap_or_else(|| "None".to_owned()))
-                .collect();
-
-            table.add_row(row_text)?;
-        }
+        table.extend(rows.into_iter().map(|(_, row)| row))?;
 
         print!("{table}");
 

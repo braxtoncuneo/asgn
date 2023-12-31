@@ -217,7 +217,6 @@ impl AsgnSpec {
         )
     }
 
-
     pub fn before_open(&self) -> bool {
         self.open_date.map(|date| {
             Local::now().checked_add_days(chrono::naive::Days::new(1)).unwrap()
@@ -242,24 +241,16 @@ impl AsgnSpec {
 
         let status = slot.status().unwrap();
 
-        let mut table = Table::new(2);
-        table.add_row(vec!["PROPERTY".to_owned(), "VALUE".to_owned()])?;
-        table.add_row(vec!["NAME".to_owned(), self.name.clone()])?;
-        table.add_row(vec!["FILES".to_owned(), self.file_list.iter().join(" ")])?;
-        table.add_row(vec![
-            "OPEN DATE".to_owned(),
-            self.open_date.as_ref().map(|d| d.to_string()).unwrap_or("NONE".to_owned()),
+        let mut table = Table::new(["PROPERTY".to_owned(), "VALUE".to_owned()]);
+        table.extend([
+            ["NAME".to_owned(), self.name.clone()],
+            ["FILES".to_owned(), self.file_list.iter().join(" ")],
+            ["OPEN DATE".to_owned(), Table::option_repr(self.open_date.as_ref())],
+            ["CLOSE DATE".to_owned(), Table::option_repr(self.close_date.as_ref())],
+            ["DUE DATE".to_owned(), Table::option_repr(self.due_date.as_ref())],
+            ["EXTENSION".to_owned(), status.extension_days.to_string()],
+            ["GRACE".to_owned(), status.grace_days.to_string()],
         ])?;
-        table.add_row(vec![
-            "CLOSE DATE".to_owned(),
-            self.close_date.map(|d| d.to_string()).unwrap_or("NONE".to_owned()),
-        ])?;
-        table.add_row(vec![
-            "DUE DATE".to_owned(),
-            self.due_date.map(|d| d.to_string()).unwrap_or("NONE".to_owned()),
-        ])?;
-        table.add_row(vec!["EXTENSION".to_owned(), status.extension_days.to_string()])?;
-        table.add_row(vec!["GRACE".to_owned(), status.grace_days.to_string()])?;
 
         Ok(table)
     }
