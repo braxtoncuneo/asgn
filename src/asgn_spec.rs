@@ -113,7 +113,7 @@ impl From<AsgnSpec> for AsgnSpecToml {
             name: spec.name,
             active: spec.active,
             visible: spec.visible,
-            file_list:  spec.file_list.clone(),
+            file_list: spec.file_list.clone(),
 
             build: spec.build,
             check: spec.check,
@@ -155,19 +155,19 @@ impl AsgnSpec {
     pub fn from_toml(path: PathBuf, toml: AsgnSpecToml) -> Result<Self, Error> {
         let open_date = toml.open_date.map(|toml_date|
             toml_date.try_into_chrono_date_time().ok_or_else(||
-                Error::BadSpec(path.clone(), "Missing open date.")
+                Error::bad_spec(&path, "Missing open date.")
             )
         ).transpose()?;
 
         let close_date = toml.close_date.map(|toml_date|
             toml_date.try_into_chrono_date_time().ok_or_else(||
-                Error::BadSpec(path.clone(), "Missing close date.")
+                Error::bad_spec(&path, "Missing close date.")
             )
         ).transpose()?;
 
         let due_date = toml.due_date.map(|toml_date|
             toml_date.try_into_chrono_date_time().ok_or_else(||
-                Error::BadSpec(path.clone(), "Missing due date.")
+                Error::bad_spec(&path, "Missing due date.")
             )
         ).transpose()?;
 
@@ -195,17 +195,17 @@ impl AsgnSpec {
         let info_path = spec_path.join("info.toml");
 
         let info_text = fs::read_to_string(&info_path).map_err(|err|
-            Error::SpecIo(info_path.clone(), err.kind())
+            Error::spec_io(info_path.clone(), err)
         )?;
 
         let spec_toml: AsgnSpecToml = toml::from_str(&info_text).map_err(|err|
-            Error::InvalidToml(info_path.clone(), err)
+            Error::invalid_toml(info_path.clone(), err)
         )?;
 
         let spec = Self::from_toml(path.to_owned(), spec_toml)?;
 
         if !path.ends_with(&spec.name) {
-            return Err(Error::BadSpec(path.to_owned(), "Name field does not match assignment directory name."));
+            return Err(Error::bad_spec(path, "Name field does not match assignment directory name."));
         }
 
         Ok(spec)
@@ -215,12 +215,12 @@ impl AsgnSpec {
         let spec_toml = AsgnSpecToml::from(self);
 
         let toml_text = toml::to_string(&spec_toml).map_err(|err|
-            Error::TomlSer("AssignSpecToml", err)
+            Error::toml_ser("AssignSpecToml", err)
         )?;
 
         let path = self.path.join(".info").join("info.toml");
         fs::write(&path, toml_text).map_err(|err|
-            Error::Io("Failed to write spec file", path.to_owned(), err.kind())
+            Error::io("Failed to write spec file", path, err)
         )
     }
 
@@ -410,7 +410,7 @@ impl AsgnSpec {
             if did_pass && is_metric {
                 let path = path.join(&rule.target);
                 let result = fs::read_to_string(&path).map_err(|err|
-                    Error::Io("Failed to read file", path, err.kind())
+                    Error::io("Failed to read file", path, err)
                 );
 
                 match (rule.kind.as_ref(), result) {
@@ -478,18 +478,18 @@ impl AsgnSpec {
 
         if dst_dir.is_dir() {
             fs::remove_dir_all(dst_dir).map_err(|err|
-                Error::Io("Failed to remove directory", dst_dir.to_owned(), err.kind())
+                Error::io("Failed to remove directory", dst_dir, err)
             )?;
         }
 
         if dst_dir.is_file() {
             fs::remove_file(dst_dir).map_err(|err|
-                Error::Io("Failed to remove file", dst_dir.to_owned(), err.kind())
+                Error::io("Failed to remove file", dst_dir, err)
             )?;
         }
 
         fs::create_dir(dst_dir).map_err(|err|
-            Error::Io("Failed to create directory", dst_dir.to_owned(), err.kind())
+            Error::io("Failed to create directory", dst_dir, err)
         )?;
 
         for file_name in &self.file_list {
@@ -500,14 +500,14 @@ impl AsgnSpec {
             }
 
             if !src_path.exists() {
-                return Err(Error::Custom(
+                return Err(Error::custom(
                     format!("could not copy file {} to {}", src_path.display(), dst_path.display()),
                     "File does not exist in the submission directory.".to_owned(),
                 ));
             }
 
             fs::copy(&src_path, &dst_path).map_err(|err|
-                Error::Io("Failed to copy file", src_path.to_owned(), err.kind())
+                Error::io("Failed to copy file", src_path, err)
             )?;
         }
 
@@ -557,11 +557,11 @@ impl<'ctx> SubmissionSlot<'ctx> {
         let toml_text = match fs::read_to_string(&path) {
             Ok(toml_text) => toml_text,
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(0),
-            Err(err) => return Err(Error::Io("Failed to read grace file", path, err.kind())),
+            Err(err) => return Err(Error::io("Failed to read grace file", path, err)),
         };
 
         let grace: GraceToml = toml::from_str(&toml_text).map_err(|err|
-            Error::InvalidToml(path, err)
+            Error::invalid_toml(path, err)
         )?;
 
         Ok(grace.value)
@@ -571,10 +571,10 @@ impl<'ctx> SubmissionSlot<'ctx> {
         let grace_toml = GraceToml { value };
         let grace_path = self.grace_path();
         let toml_text = toml::to_string(&grace_toml).map_err(|err|
-            Error::TomlSer("GraceToml", err)
+            Error::toml_ser("GraceToml", err)
         )?;
         fs::write(self.grace_path(), toml_text).map_err(|err|
-            Error::Io("Failed to write grace file", grace_path.clone(), err.kind())
+            Error::io("Failed to write grace file", &grace_path, err)
         )?;
 
         Ok(())
@@ -588,24 +588,24 @@ impl<'ctx> SubmissionSlot<'ctx> {
         }
 
         let owner_uid = fs::metadata(&ext_path)
-            .map_err(|err| Error::Io("Failed to stat file", ext_path.clone(), err.kind()))?
+            .map_err(|err| Error::io("Failed to stat file", &ext_path, err))?
             .uid();
 
         let owner = get_user_by_uid(owner_uid)
-            .ok_or(Error::InvalidUID(owner_uid))?
+            .ok_or(Error::invalid_uid(owner_uid))?
             .name().to_str().unwrap()
             .to_owned();
 
         if owner != self.context.instructor {
-            return Err(Error::FilePresence(ext_path, FilePresenceErrorKind::NotFound));
+            return Err(Error::file_presence(&ext_path, FilePresenceErrorKind::NotFound));
         }
 
         let toml_text = fs::read_to_string(&ext_path).map_err(|err|
-            Error::Io("Failed to read extension file", ext_path.clone(), err.kind())
+            Error::io("Failed to read extension file", &ext_path, err)
         )?;
 
         let ext: ExtensionToml = toml::from_str(&toml_text).map_err(|err|
-            Error::InvalidToml(ext_path, err)
+            Error::invalid_toml(&ext_path, err)
         )?;
 
         Ok(ext.value)
@@ -615,10 +615,10 @@ impl<'ctx> SubmissionSlot<'ctx> {
         let ext_toml = ExtensionToml { value };
         let ext_path = self.extension_path();
         let toml_text = toml::to_string(&ext_toml).map_err(|err|
-            Error::TomlSer("ExtensionToml", err)
+            Error::toml_ser("ExtensionToml", err)
         )?;
         fs::write(&ext_path, toml_text).map_err(|err|
-            Error::Io("Failed to write extension file", ext_path, err.kind())
+            Error::io("Failed to write extension file", ext_path, err)
         )?;
         Ok(())
     }
@@ -630,7 +630,7 @@ impl<'ctx> SubmissionSlot<'ctx> {
             let mut mtime: i64 = 0;
             for path in self.file_paths() {
                 let meta = fs::metadata(&path).map_err(|err|{
-                    Error::Io("Failed to stat file", path, err.kind())
+                    Error::io("Failed to stat file", path, err)
                 })?;
                 mtime = mtime.max(meta.mtime());
             }
@@ -642,7 +642,7 @@ impl<'ctx> SubmissionSlot<'ctx> {
         let turn_in_time = if let Some(seconds) = time {
             let turn_in = Local.timestamp_opt(seconds, 0)
                 .earliest()
-                .ok_or(Error::Custom("Impossible time conversion".to_owned(), CONTACT_INSTRUCTOR.to_owned()))?;
+                .ok_or(Error::custom("Impossible time conversion", CONTACT_INSTRUCTOR))?;
             Some(turn_in)
         } else {
             None

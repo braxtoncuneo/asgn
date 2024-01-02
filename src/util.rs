@@ -5,7 +5,8 @@ use std::{
     fs::{self, Permissions},
     io::{Write, self},
     path::{Path, PathBuf},
-    process::{Command, ExitStatus, Stdio}, fmt::{self, Write as _},
+    process::{Command, ExitStatus, Stdio},
+    fmt::{self, Write as _},
     os::unix::fs::PermissionsExt,
 };
 
@@ -49,7 +50,7 @@ impl fmt::Display for Hline {
 pub fn run_at(mut cmd: Command, path: impl AsRef<Path>, pipe_stdout: bool) -> Result<ExitStatus, Error> {
     let cmd = cmd.current_dir(path.as_ref());
     let program = cmd.get_program().to_owned().into_string().unwrap();
-    let make_err = |err: io::Error| Error::Command(program.to_owned(), err.kind());
+    let make_err = |err: io::Error| Error::command(&program, err);
 
     let output = if pipe_stdout {
         cmd
@@ -70,8 +71,8 @@ pub fn run_at(mut cmd: Command, path: impl AsRef<Path>, pipe_stdout: bool) -> Re
 }
 
 pub fn set_mode(path: impl AsRef<Path>, mode: u32) -> Result<(), Error> {
-    fs::set_permissions(path.as_ref(), Permissions::from_mode(mode)).map_err(|err|
-        Error::Io("Failed to chmod", path.as_ref().to_owned(), err.kind())
+    fs::set_permissions(&path, Permissions::from_mode(mode)).map_err(|err|
+        Error::io("Failed to chmod", &path, err)
     )
 }
 
@@ -116,12 +117,12 @@ pub fn set_facl<'facl>(
     cmd.arg(entry_string.clone()).arg(path.as_ref());
 
     let output = cmd.output().map_err(|err|
-        Error::Command("setfacl".to_owned(), err.kind())
+        Error::command("setfacl", err)
     )?;
 
     if !output.status.success() {
         let err_msg = String::from_utf8_lossy(&output.stderr).into_owned();
-        return Err(Error::Subprocess("setfacl", err_msg))
+        return Err(Error::subprocess("setfacl", err_msg))
     }
 
     Ok(())
@@ -134,7 +135,7 @@ pub fn refresh_file(path: impl AsRef<Path>, mode: u32, default_text: &str) -> Re
 
     if !path.exists() {
         fs::write(path, default_text).map_err(|err|
-            Error::Io("Failed to crete default file", path.to_owned(), err.kind())
+            Error::io("Failed to crete default file", path, err)
         )?;
     }
 
@@ -153,7 +154,7 @@ pub fn refresh_dir<'facl>(
 
     if !path.exists() {
         fs::create_dir(path).map_err(|err|
-            Error::Io("Failed to create directory", path.to_owned(), err.kind())
+            Error::io("Failed to create directory", path, err)
         )?;
     }
 
@@ -188,11 +189,7 @@ pub fn recursive_refresh_dir<'facl> (
 
     for maybe_entry in WalkDir::new(path).min_depth(1) {
         let dir_entry = maybe_entry.map_err(|err|
-            Error::Io(
-                "Failed to get directory entry",
-                path.to_owned(),
-                io::Error::from(err).kind(),
-            )
+            Error::io("Failed to get directory entry", path, err.into())
         )?;
         recursive_refresh_dir(dir_entry.path(), mode, facl.clone())?;
     }
@@ -201,16 +198,16 @@ pub fn recursive_refresh_dir<'facl> (
 }
 
 pub fn bashrc_append_line(line: &str) -> Result<(), Error> {
-    let home_path: PathBuf = dirs::home_dir().ok_or(Error::NoHomeDir)?;
+    let home_path: PathBuf = dirs::home_dir().ok_or_else(Error::no_home_dir)?;
 
     let bashrc_path : PathBuf = home_path.join(".bashrc");
     let mut bashrc = fs::OpenOptions::new()
         .append(true)
         .open(&bashrc_path)
-        .map_err(|err| Error::Io("Failed to open bashrc", bashrc_path.clone(), err.kind()))?;
+        .map_err(|err| Error::io("Failed to open bashrc", &bashrc_path, err))?;
 
     writeln!(bashrc, "{line}").map_err(|err|
-        Error::Io("Failed writing to bashrc", bashrc_path, err.kind())
+        Error::io("Failed writing to bashrc", bashrc_path, err)
     )?;
 
     Ok(())
@@ -294,10 +291,10 @@ impl ChronoDateTimeExt for chrono::DateTime<chrono::Local> {
 
 pub fn parse_from<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Error> {
     let text = fs::read_to_string(path).map_err(|err|
-        Error::Io("Failed to read file", path.to_owned(), err.kind())
+        Error::io("Failed to read file", path, err)
     )?;
 
     toml::from_str(&text).map_err(|err|
-        Error::InvalidToml(path.to_owned(), err)
+        Error::invalid_toml(path, err)
     )
 }

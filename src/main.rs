@@ -28,7 +28,7 @@ fn main() {
         match ctx_try {
             Ok(ctx) => {
                 if command == Some("init") {
-                    print!("{}", Error::Custom(
+                    print!("{}", Error::custom(
                         "Provided path is already the base path of a pre-existing, valid course directory.".to_owned(),
                         "Either clear out that directory, or use a different one.".to_owned()
                     ));
@@ -52,7 +52,7 @@ fn main() {
         Role::Grader => act::grader::GraderCmd::from_args().act.execute(&context),
         Role::Student => act::student::StudentCmd::from_args().act.execute(&context),
         Role::Other => {
-            println!("{}", Error::NoSuchMember(context.username));
+            println!("{}", Error::no_such_member(&context.username));
             return;
         }
     };

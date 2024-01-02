@@ -82,11 +82,11 @@ impl Context {
         let course_file_path = base_path.join(".info").join("course.toml");
 
         let course_file_text = fs::read_to_string(&course_file_path).map_err(|err|
-            Error::SpecIo(course_file_path.clone(), err.kind())
+            Error::spec_io(&course_file_path, err)
         )?;
 
         toml::from_str(&course_file_text).map_err(|err|
-            Error::InvalidToml(course_file_path, err)
+            Error::invalid_toml(course_file_path, err)
         )
     }
 
@@ -96,11 +96,11 @@ impl Context {
         let course_toml = CourseToml::from(self);
 
         let toml_text = toml::to_string(&course_toml).map_err(|err|
-            Error::TomlSer("CourseToml", err)
+            Error::toml_ser("CourseToml", err)
         )?;
 
         fs::write(&course_file_path, toml_text).map_err(|err|
-            Error::Io("Failed writing course file", course_file_path, err.kind())
+            Error::io("Failed writing course file", course_file_path, err)
         )
     }
 
@@ -113,14 +113,14 @@ impl Context {
 
     pub fn catalog_get<'a>(&'a self, asgn_name: &str) -> Result<&'a AsgnSpec, Error> {
         self.catalog.get(asgn_name)
-            .ok_or(Error::InvalidAsgn { name: asgn_name.to_owned() })?
+            .ok_or(Error::invalid_asgn(asgn_name))?
             .as_ref()
             .map_err(Clone::clone)
     }
 
     pub fn catalog_get_mut<'a>(&'a mut self, asgn_name: &str) -> Result<&'a mut AsgnSpec, Error> {
         self.catalog.get_mut(asgn_name)
-            .ok_or(Error::InvalidAsgn { name: asgn_name.to_owned() })?
+            .ok_or(Error::invalid_asgn(asgn_name))?
             .as_mut()
             .map_err(|err| err.clone())
     }
@@ -131,26 +131,26 @@ impl Context {
 
         let uid = get_current_uid();
         let username = get_user_by_uid(uid)
-            .ok_or(Error::InvalidUID(uid))?
+            .ok_or(Error::invalid_uid(uid))?
             .name().to_str().unwrap()
             .to_owned();
 
-        let cwd = current_dir().map_err(|_| Error::InvalidCWD)?;
+        let cwd = current_dir().map_err(Error::invalid_cwd)?;
 
         let exe_path = std::fs::read_link(PROC_SELF_EXE).map_err(|err|
-            Error::Io("Failed to read process' EXE path", PathBuf::from(PROC_SELF_EXE), err.kind())
+            Error::io("Failed to read process' EXE path", PathBuf::from(PROC_SELF_EXE), err)
         )?;
 
         if !base_path.is_dir() {
-            return Err(Error::NoBaseDir(base_path));
+            return Err(Error::no_base_dir(base_path));
         }
 
         let instructor_uid = std::fs::metadata(&base_path)
-            .map_err(|err| Error::Io("Failed to stat file", base_path.clone(), err.kind()))?
+            .map_err(|err| Error::io("Failed to stat file", base_path.clone(), err))?
             .uid();
 
         let instructor = get_user_by_uid(instructor_uid)
-                .ok_or(Error::InvalidUID(uid))?
+                .ok_or(Error::invalid_uid(uid))?
                 .name().to_str().unwrap().to_owned();
 
         let time = Local::now();
@@ -211,9 +211,9 @@ impl Context {
         println!("Called from directory {}", self.cwd.display());
     }
 
-    fn make_dir_public<P: AsRef<Path>, L: AsRef<str>>(path: impl AsRef<Path>) -> Result<(), Error> {
+    fn make_dir_public(path: impl AsRef<Path>) -> Result<(), Error> {
         let mut perm = fs::metadata(path.as_ref())
-            .map_err(|err| Error::Io("Failed to stat file", path.as_ref().to_owned(), err.kind()))?
+            .map_err(|err| Error::io("Failed to stat file", path, err))?
             .permissions();
 
         perm.set_mode(0o755);
@@ -344,14 +344,14 @@ impl Context {
             let offset_date = if offset >= 0 {
                 date.naive_local()
                     .checked_add_days(Days::new(offset as u64))
-                    .ok_or(Error::DateOutOfRange(date))?
+                    .ok_or(Error::date_out_of_range(date))?
             } else {
                 date.naive_local()
                     .checked_sub_days(Days::new(-offset as u64))
-                    .ok_or(Error::DateOutOfRange(date))?
+                    .ok_or(Error::date_out_of_range(date))?
             };
             let offset_date = Local.from_local_datetime(&offset_date).single()
-                .ok_or(Error::DateOutOfRange(date))?;
+                .ok_or(Error::date_out_of_range(date))?;
 
             Ok(Some(offset_date))
         } else {
@@ -452,7 +452,7 @@ impl Context {
         let asgn_names: Vec<_> = match asgn_name {
             Some(name) => {
                 if !self.manifest.iter().any(|asgn| asgn == name) {
-                    return Err(Error::InvalidAsgn { name: name.to_owned() })
+                    return Err(Error::invalid_asgn(name))
                 }
                 vec![name]
             }
@@ -462,7 +462,7 @@ impl Context {
         let usernames: Vec<_> = match username {
             Some(username) => {
                 if !self.members.iter().any(|member| member == username) {
-                    return Err(Error::InvalidUser(username.to_owned()))
+                    return Err(Error::invalid_user(username))
                 }
                 vec![username]
             }
@@ -544,9 +544,9 @@ pub fn init(base_path: impl AsRef<Path>) -> Result<(), ErrorLog> {
     let base_path = base_path.as_ref();
 
     if !base_path.exists() {
-        return Err(Error::Custom(
-            "Course directory path does not exist.".to_owned(),
-            "Ensure that the provided path corresponds to an existing directory.".to_owned(),
+        return Err(Error::custom(
+            "Course directory path does not exist.",
+            "Ensure that the provided path corresponds to an existing directory.",
         ).into());
     }
 

@@ -265,10 +265,10 @@ impl InstructorAct {
     fn set_due(asgn_name: &str, date: &str, context: &mut Context) -> Result<(), Error> {
         let spec = context.catalog_get_mut(asgn_name)?;
         let toml_date = toml::value::Datetime::from_str(date).map_err(|_|
-            Error::InvalidDate(date.to_owned())
+            Error::invalid_date(date)
         )?;
         spec.due_date = Some(toml_date.try_into_chrono_date_time().ok_or_else(||
-            Error::BadSpec(spec.path.clone(), "Missing due date")
+            Error::bad_spec(&spec.path, "Missing due date")
         )?);
         spec.sync()
     }
@@ -276,10 +276,10 @@ impl InstructorAct {
     fn set_open(asgn_name: &str, date: &str, context: &mut Context) -> Result<(), Error> {
         let spec = context.catalog_get_mut(asgn_name)?;
         let toml_date = toml::value::Datetime::from_str(date).map_err(|_|
-            Error::InvalidDate(date.to_owned())
+            Error::invalid_date(date)
         )?;
         spec.open_date = Some(toml_date.try_into_chrono_date_time().ok_or_else(||
-            Error::BadSpec(spec.path.clone(), "Missing open date")
+            Error::bad_spec(&spec.path, "Missing open date")
         )?);
         spec.sync()
     }
@@ -287,10 +287,10 @@ impl InstructorAct {
     fn set_close(asgn_name: &str, date: &str, context: &mut Context) -> Result<(), Error> {
         let spec = context.catalog_get_mut(asgn_name)?;
         let toml_date = toml::value::Datetime::from_str(date).map_err(|_|
-            Error::InvalidDate(date.to_owned())
+            Error::invalid_date(date)
         )?;
         spec.close_date = Some(toml_date.try_into_chrono_date_time().ok_or_else(||
-            Error::BadSpec(spec.path.clone(), "Missing close date")
+            Error::bad_spec(&spec.path, "Missing close date")
         )?);
         spec.sync()
     }
@@ -373,7 +373,7 @@ impl InstructorAct {
 
         if let Some(stats) = stats {
             let old_time = stats.time.try_into_chrono_date_time().ok_or_else(||
-                Error::BadStats { username: username.to_owned(), desc: "Missing date" }
+                Error::bad_stats(username, "Missing date")
             )?;
             if turn_in_time.signed_duration_since(old_time) <= Duration::seconds(1) {
                 println!("{FG_YELLOW}{TEXT_BOLD}{username} is already up-to-date.{STYLE_RESET}");
@@ -407,7 +407,7 @@ impl InstructorAct {
         let info_path = spec.path.join(".info");
         let build_path = info_path.join(".internal").join("score_build");
         let build_path = tempdir_in(build_path.clone()).map_err(|err|
-            Error::Io("Failed to create temp dir", build_path, err.kind())
+            Error::io("Failed to create temp dir", build_path, err)
         )?;
 
         let stat_path = info_path.join("score.toml");
@@ -428,11 +428,11 @@ impl InstructorAct {
         }
 
         let toml_text = toml::to_string(&new_stats).map_err(|err|
-            Error::TomlSer("StatBlockSet", err)
+            Error::toml_ser("StatBlockSet", err)
         )?;
 
         fs::write(&stat_path, toml_text).map_err(|err|
-            Error::Io("Failed to write stat block file", stat_path, err.kind())
+            Error::io("Failed to write stat block file", stat_path, err)
         )?;
 
         Ok(())
