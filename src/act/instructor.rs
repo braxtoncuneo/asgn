@@ -1,6 +1,7 @@
 use std::{
     str::FromStr,
     path::{Path, PathBuf},
+    fs,
 };
 
 use crate:: {
@@ -8,7 +9,12 @@ use crate:: {
     error:: {ErrorLog, Error},
     asgn_spec::{AsgnSpec, StatBlock, StatBlockSet},
     act::{student::StudentAct, grader::GraderAct},
-    util::{self, color::{FG_YELLOW, TEXT_BOLD, STYLE_RESET}},
+    util::{
+        self,
+        color::{FG_YELLOW, TEXT_BOLD, STYLE_RESET},
+        TomlDatetimeExt,
+        ChronoDateTimeExt,
+    },
 };
 
 use structopt::StructOpt;
@@ -258,28 +264,34 @@ impl InstructorAct {
 
     fn set_due(asgn_name: &str, date: &str, context: &mut Context) -> Result<(), Error> {
         let spec = context.catalog_get_mut(asgn_name)?;
-        let date = toml::value::Datetime::from_str(date).map_err(|err|
-            Error::IOFail(err.to_string())
+        let toml_date = toml::value::Datetime::from_str(date).map_err(|_|
+            Error::InvalidDate(date.to_owned())
         )?;
-        spec.due_date = Some(util::date_into_chrono(date)?);
+        spec.due_date = Some(toml_date.try_into_chrono_date_time().ok_or_else(||
+            Error::BadSpec(spec.path.clone(), "Missing due date")
+        )?);
         spec.sync()
     }
 
     fn set_open(asgn_name: &str, date: &str, context: &mut Context) -> Result<(), Error> {
         let spec = context.catalog_get_mut(asgn_name)?;
-        let date = toml::value::Datetime::from_str(date).map_err(|err|
-            Error::IOFail(err.to_string())
+        let toml_date = toml::value::Datetime::from_str(date).map_err(|_|
+            Error::InvalidDate(date.to_owned())
         )?;
-        spec.open_date = Some(util::date_into_chrono(date)?);
+        spec.open_date = Some(toml_date.try_into_chrono_date_time().ok_or_else(||
+            Error::BadSpec(spec.path.clone(), "Missing open date")
+        )?);
         spec.sync()
     }
 
     fn set_close(asgn_name: &str, date: &str, context: &mut Context) -> Result<(), Error> {
         let spec = context.catalog_get_mut(asgn_name)?;
-        let date = toml::value::Datetime::from_str(date).map_err(|err|
-            Error::IOFail(err.to_string())
+        let toml_date = toml::value::Datetime::from_str(date).map_err(|_|
+            Error::InvalidDate(date.to_owned())
         )?;
-        spec.close_date = Some(util::date_into_chrono(date)?);
+        spec.close_date = Some(toml_date.try_into_chrono_date_time().ok_or_else(||
+            Error::BadSpec(spec.path.clone(), "Missing close date")
+        )?);
         spec.sync()
     }
 
@@ -350,7 +362,6 @@ impl InstructorAct {
     fn latest_score(old_stats: &StatBlockSet, username: &str, build_root: &Path, asgn: &AsgnSpec, context: &Context)
     -> Result<Option<StatBlock>, Error>
     {
-
         let slot = context.get_slot(asgn, username);
         let status = slot.status().unwrap();
 
@@ -361,7 +372,9 @@ impl InstructorAct {
         let stats = old_stats.get_block(username);
 
         if let Some(stats) = stats {
-            let old_time = util::date_into_chrono(stats.time.clone())?;
+            let old_time = stats.time.try_into_chrono_date_time().ok_or_else(||
+                Error::BadStats { username: username.to_owned(), desc: "Missing date" }
+            )?;
             if turn_in_time.signed_duration_since(old_time) <= Duration::seconds(1) {
                 println!("{FG_YELLOW}{TEXT_BOLD}{username} is already up-to-date.{STYLE_RESET}");
                 return Ok(Some(stats.clone()));
@@ -378,12 +391,11 @@ impl InstructorAct {
         }
         let _ = asgn.run_ruleset(context, asgn.build.as_ref(), &build_path, false);
 
-        let time = util::date_from_chrono(turn_in_time);
         let scores = asgn.run_ruleset(context, asgn.score.as_ref(), &build_path, true).unwrap_or_default();
 
         let stat_block = StatBlock {
             username: username.to_owned(),
-            time,
+            time: turn_in_time.to_toml_datetime(),
             scores
         };
 
@@ -395,11 +407,11 @@ impl InstructorAct {
         let info_path = spec.path.join(".info");
         let build_path = info_path.join(".internal").join("score_build");
         let build_path = tempdir_in(build_path.clone()).map_err(|err|
-            Error::IOFail(format!("Failed to create temp dir '{}': {}", build_path.display(), err))
+            Error::Io("Failed to create temp dir", build_path, err.kind())
         )?;
 
         let stat_path = info_path.join("score.toml");
-        let old_stats = util::parse_from::<StatBlockSet>(&stat_path)?;
+        let old_stats: StatBlockSet = util::parse_from(&stat_path)?;
 
         let mut new_stats: StatBlockSet = Default::default();
 
@@ -415,7 +427,13 @@ impl InstructorAct {
             }
         }
 
-        util::serialize_into(&stat_path, &new_stats)?;
+        let toml_text = toml::to_string(&new_stats).map_err(|err|
+            Error::TomlSer("StatBlockSet", err)
+        )?;
+
+        fs::write(&stat_path, toml_text).map_err(|err|
+            Error::Io("Failed to write stat block file", stat_path, err.kind())
+        )?;
 
         Ok(())
     }
@@ -444,10 +462,10 @@ impl InstructorAct {
                 asgn_name.as_ref().unwrap_or(&None).as_deref(),
                 username.as_ref().unwrap_or(&None).as_deref(),
             )?,
-            AddStudents     { usernames      } => Self::add_students(usernames, context)?,
-            RemStudents     { usernames      } => Self::remove_students(&usernames, context)?,
-            AddGraders      { usernames      } => Self::add_graders(usernames, context)?,
-            RemGraders      { usernames      } => Self::remove_graders(&usernames, context)?,
+            AddStudents     { usernames       } => Self::add_students(usernames, context)?,
+            RemStudents     { usernames       } => Self::remove_students(&usernames, context)?,
+            AddGraders      { usernames       } => Self::add_graders(usernames, context)?,
+            RemGraders      { usernames       } => Self::remove_graders(&usernames, context)?,
             AddAsgns        { asgn_names      } => Self::add_assignments(asgn_names, context)?,
             RemAsgns        { asgn_names      } => Self::remove_assignments(&asgn_names, context)?,
             SetDue          { asgn_name, date } => Self::set_due(&asgn_name, &date, context)?,

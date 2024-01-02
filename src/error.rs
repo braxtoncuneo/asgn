@@ -1,35 +1,122 @@
-use std::{fmt, path::PathBuf};
+use std::{fmt, path::{PathBuf, Path}, io};
+
 use crate::util::color::{FG_RED, FG_YELLOW, STYLE_RESET};
 
-#[derive(Debug, Clone)]
+pub const CONTACT_INSTRUCTOR: &str = "Please contact the instructor.";
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FilePresenceErrorKind {
+    NotFound, FileIsDir, FileIsOther,
+}
+
+impl FilePresenceErrorKind {
+    pub fn description(&self) -> &'static str {
+        use FilePresenceErrorKind::*;
+        match self {
+            NotFound => "File not found",
+            FileIsDir => "File is actually a directory",
+            FileIsOther => "File is neither a normal file nor a directory",
+        }
+    }
+
+    pub fn advice(&self) -> &'static str {
+        use FilePresenceErrorKind::*;
+        match self {
+            NotFound => "Please ensure that the file exists",
+            FileIsDir => "Please ensure that the file is not a directory",
+            FileIsOther => "Please ensure that the file is actually a file",
+        }
+    }
+
+    pub fn test(path: &Path) -> Option<Self> {
+        use FilePresenceErrorKind::*;
+        if !path.exists() { Some(NotFound) }
+        else if path.is_dir() { Some(FileIsDir) }
+        else if !path.is_file() { Some(FileIsOther) }
+        else { None }
+    }
+
+    pub fn at(self, path: PathBuf) -> Error {
+        Error::FilePresence(path, self)
+    }
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GraceErrorKind {
+    NotInCourse, Insufficient, LimitReached,
+}
+
+impl GraceErrorKind {
+    pub fn description(&self) -> &'static str {
+        use GraceErrorKind::*;
+        match self {
+            NotInCourse => "This course does not provide grace days.",
+            Insufficient => "There aren't enough free grace days to provide such an extension.",
+            LimitReached => "The number of grace days requested exceeds the per-assignment grace day limit.",
+        }
+    }
+
+    pub fn advice(&self) -> &'static str {
+        use GraceErrorKind::*;
+        match self {
+            NotInCourse => "Assignments should be turned in on-time for full credit.",
+            Insufficient => "To increase the number of available grace days, remove grace days from other assignments.",
+            LimitReached => "Assignments should be turned in before the grace day limit for full credit.",
+        }
+    }
+}
+
+impl From<GraceErrorKind> for Error {
+    fn from(kind: GraceErrorKind) -> Self { Self::Grace(kind) }
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum InactiveErrorKind {
+    BeforeOpen, AfterClose, Inactive
+}
+
+impl InactiveErrorKind {
+    pub fn description(&self) -> &'static str {
+        use InactiveErrorKind::*;
+        match self {
+            BeforeOpen => "Assignments cannot be interacted with before their open date.",
+            AfterClose => "Assignments cannot be interacted with after their close date.",
+            Inactive   => "Interaction with this assignment is currently disabled.",
+        }
+    }
+}
+
+impl From<InactiveErrorKind> for Error {
+    fn from(kind: InactiveErrorKind) -> Self { Self::Inactive(kind) }
+}
+
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Error {
-    NoBaseDir(PathBuf),
-    LocalBuildFail(String),
-    DestBuildFail(String),
-    FormatFail(String),
-    StyleFail(String),
-    TestFail(String),
-    TableError,
-    NoSpec(String, String),
-    BadSpec(String, String),
-    IOFail(String),
+    InvalidCWD,
     InvalidUID(u32),
-    InvalidCWD(),
-    InvalidAsgn(String),
     InvalidUser(String),
-    MissingFile(String),
-    MissingSub(String),
-    FileIsDir(String),
-    FileIsOther(String),
+    NoHomeDir,
+    NoBaseDir(PathBuf),
+    SpecIo(PathBuf, io::ErrorKind),
+    BadSpec(PathBuf, &'static str),
+    BadStats { username: String, desc: &'static str },
+    Io(&'static str, PathBuf, io::ErrorKind),
+    Command(String, io::ErrorKind),
+    Subprocess(&'static str, String),
+    InvalidDate(String),
+    DateOutOfRange(chrono::DateTime<chrono::Local>),
+    InvalidToml(PathBuf, toml::de::Error),
+    TomlSer(&'static str, toml::ser::Error),
+    InvalidAsgn { name: String },
+    FilePresence(PathBuf, FilePresenceErrorKind),
     NoSetup(String),
     NoSuchMember(String),
-    Unauthorized,
-    BeforeOpen,
-    AfterClose,
-    Inactive,
-    NoGrace,
-    NotEnoughGrace,
-    GraceLimit,
+    TableError,
+    Inactive(InactiveErrorKind),
+    Grace(GraceErrorKind),
     Custom(String, String),
 }
 
@@ -39,77 +126,67 @@ impl fmt::Display for Error {
 
         write!(f, "{FG_RED}! ")?;
         match self {
-            NoBaseDir(dir)      => write!(f, "Base submission directory for course{STYLE_RESET} '{}' {FG_RED}does not exist.", dir.display()),
-            NoSpec(name, desc)  => write!(f, "Specification file for{STYLE_RESET} {name} {FG_RED}could not be read, IO Error:{STYLE_RESET} {desc}"),
-            BadSpec(name, desc) => write!(f, "Specification file for{STYLE_RESET} {name} {FG_RED}is malformed:{STYLE_RESET} {desc}"),
-            IOFail(desc)        => write!(f, "IO Failure:{STYLE_RESET} {desc}"),
-            InvalidAsgn(name)   => write!(f, "Assignment{STYLE_RESET} '{name}' {FG_RED}is invalid or non-existant."),
-            InvalidUser(name)   => write!(f, "User{STYLE_RESET} '{name}' {FG_RED}is invalid."),
-            InvalidCWD()        => write!(f, "Failed to access Current Working Directory."),
-            InvalidUID(uid)     => write!(f, "UID {uid} is invalid."),
-            LocalBuildFail(err) => write!(f, "\n\nBuild failure in current working directory:{STYLE_RESET} {err}"),
-            DestBuildFail(err)  => write!(f, "\n\nBuild failure in submission directory:{STYLE_RESET} {err}"),
-            FormatFail(err)     => write!(f, "\n\nFailed to format files:{STYLE_RESET} {err}"),
-            StyleFail(err)      => write!(f, "\n\nFailed to check style:{STYLE_RESET} {err}"),
-            TestFail(err)       => write!(f, "\n\nFailed to test functionality due to internal error:{STYLE_RESET} {err}"),
-            MissingFile(name)   => write!(f, "File{STYLE_RESET} '{name}' {FG_RED}does not exist in current working directory."),
-            MissingSub(name)    => write!(f, "File{STYLE_RESET} '{name}' {FG_RED}does not exist in the submission directory."),
-            FileIsDir(name)     => write!(f, "File{STYLE_RESET} '{name}' {FG_RED}is actually a directory."),
-            FileIsOther(name)   => write!(f, "File{STYLE_RESET} '{name}' {FG_RED}in neither a file nor a directory."),
-            NoSetup(name)       => write!(f, "Setup files are not available for assignment{STYLE_RESET} '{name}'{FG_RED}."),
-            NoSuchMember(name)  => write!(f, "User{STYLE_RESET} '{name}' {FG_RED} is not a member of this course."),
-            TableError          => write!(f, "Failure while constructing output table."),
-            Unauthorized        => write!(f, "You are not authorized to perform this action."),
-            BeforeOpen          => write!(f, "Assignments cannot be interacted with before their open date."),
-            AfterClose          => write!(f, "Assignments cannot be interacted with after their close date."),
-            Inactive            => write!(f, "Interaction with this assignment is currently disabled."),
-            NoGrace             => write!(f, "This course does not provide grace days."),
-            NotEnoughGrace      => write!(f, "There aren't enough free grace days to provide such an extension."),
-            GraceLimit          => write!(f, "The number of grace days requested exceeds the per-assignment grace day limit."),
-            Custom(text, _)     => f.write_str(text),
+            InvalidCWD                  => write!(f, "Failed to access Current Working Directory."),
+            InvalidUID(uid)             => write!(f, "UID {uid} is invalid."),
+            InvalidUser(name)           => write!(f, "User{STYLE_RESET} '{name}' {FG_RED}is invalid."),
+            NoHomeDir                   => write!(f, "Unable to determine home directory location."),
+            NoBaseDir(path)             => write!(f, "Base submission directory for course{STYLE_RESET} '{}' {FG_RED}does not exist.", path.display()),
+            SpecIo(path, desc)          => write!(f, "Specification file at{STYLE_RESET} {} {FG_RED}could not be read, IO Error:{STYLE_RESET} {desc}", path.display()),
+            BadSpec(path, desc)         => write!(f, "Specification file at{STYLE_RESET} {} {FG_RED}is malformed:{STYLE_RESET} {desc}", path.display()),
+            BadStats { username, desc } => write!(f, "Stat block for{STYLE_RESET} {username} {FG_RED}is malformed:{STYLE_RESET} {desc}"),
+            Io(desc, path, kind)        => write!(f, "{desc} at {}:{STYLE_RESET} {kind}", path.display()),
+            Command(cmd, kind)          => write!(f, "Failed to run command {STYLE_RESET}{cmd}{FG_RED}:{STYLE_RESET} {kind}"),
+            Subprocess(desc, err)       => write!(f, "Subprocess {desc} failed:{STYLE_RESET} {err}"),
+            InvalidDate(date)           => write!(f, "Invalid date:{STYLE_RESET} {date:?}"),
+            DateOutOfRange(date)        => write!(f, "Date out of range:{STYLE_RESET} {date}"),
+            InvalidToml(path, err)      => write!(f, "Invalid toml in {STYLE_RESET} {}{FG_RED}:{STYLE_RESET}\n{err}", path.display()),
+            TomlSer(desc, err)          => write!(f, "Failed to serialize toml for {desc}:{STYLE_RESET} {err}"),
+            InvalidAsgn { name }        => write!(f, "Assignment{STYLE_RESET} '{name}' {FG_RED}is invalid or non-existant."),
+            FilePresence(path, kind)    => write!(f, "{}:{STYLE_RESET} {}", kind.description(), path.display()),
+            NoSetup(name)               => write!(f, "Setup files are not available for assignment{STYLE_RESET} '{name}'{FG_RED}."),
+            NoSuchMember(name)          => write!(f, "User{STYLE_RESET} '{name}' {FG_RED} is not a member of this course."),
+            TableError                  => write!(f, "Failure while constructing output table."),
+            Inactive(kind)              => f.write_str(kind.description()),
+            Grace(kind)                 => f.write_str(kind.description()),
+            Custom(text, _)             => f.write_str(text),
         }?;
 
         write!(f, "\n{FG_YELLOW}> ")?;
         match self {
-            NoBaseDir(_)
-            | NoSpec(_, _)
+            InvalidUID(_)
+            | NoBaseDir(_)
+            | NoHomeDir
+            | SpecIo(_, _)
             | BadSpec(_, _)
-            | IOFail(_)
-            | InvalidUID(_)
-            | TestFail(_)
-            | TableError
-            | Unauthorized => write!(f, "Please contact the instructor."),
+            | BadStats { .. }
+            | InvalidToml(_, _)
+            | TomlSer(_, _)
+            | Command { .. }
+            | Subprocess(_, _)
+            | TableError => f.write_str(CONTACT_INSTRUCTOR),
 
-            InvalidAsgn(_)
-            | InvalidUser(_)
+            InvalidUser(_)
+            | Io(_, _, _)
+            | InvalidAsgn { .. }
             | NoSetup(_)
             | NoSuchMember(_)
-            | BeforeOpen
-            | AfterClose
-            | Inactive => write!(f, "If this is an error, please contact the instructor."),
+            | Inactive(_) => f.write_str("If you believe this is an error in the course configuration, please contact the instructor."),
 
-            LocalBuildFail(_)
-            | FormatFail(_)
-            | StyleFail(_) => write!(f, "Please fix the required errors."),
+            InvalidDate(_)
+            | DateOutOfRange(_)      => f.write_str("Please enter a valid date."),
 
-            MissingFile(name)
-            | FileIsDir(name)
-            | FileIsOther(name) => write!(f, "Please ensure that{STYLE_RESET} '{name}' {FG_YELLOW}is a file."),
-
-            InvalidCWD()     => write!(f, "Please change to a valid directory."),
-            DestBuildFail(_) => write!(f, "Please ensure that only the files listed by the assignment are necessary for compilation."),
-            MissingSub(name) => write!(f, "File{STYLE_RESET} '{name}' {FG_YELLOW}cannot be recovered."),
-            NoGrace          => write!(f, "Assignments should be turned in on-time for full credit."),
-            NotEnoughGrace   => write!(f, "To increase the number of available grace days, remove grace days from other assignments."),
-            GraceLimit       => write!(f, "Assignments should be turned in before the grace day limit for full credit."),
-            Custom(_, text)  => f.write_str(text)
+            FilePresence(_, kind) => f.write_str(kind.advice()),
+            InvalidCWD            => f.write_str("Please change to a valid directory."),
+            Grace(kind)           => f.write_str(kind.advice()),
+            Custom(_, text)       => f.write_str(text)
         }?;
 
         write!(f, "{STYLE_RESET}")
     }
 }
 
-#[derive(Default, Clone, Debug)]
+
+#[derive(Default, Clone, Debug, PartialEq)]
 pub struct ErrorLog(Vec<Error>);
 
 impl ErrorLog {

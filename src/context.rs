@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf}, iter
 };
 
-use chrono::{TimeZone, DateTime, Local, Days, NaiveTime};
+use chrono::{TimeZone, DateTime, Local, Days};
 use users::{ get_user_by_uid, get_current_uid};
 use serde_derive::{ Serialize, Deserialize};
 use itertools::Itertools;
@@ -19,8 +19,6 @@ use crate::{
     table::Table,
     act::instructor::InstructorAct,
 };
-
-const DEFAULT_DUE_TIME: NaiveTime = NaiveTime::from_hms_opt(23, 59, 59).unwrap();
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct CourseToml {
@@ -74,8 +72,7 @@ pub struct Context {
     // Determined by the context file + system calls
     pub role: Role,
 
-    // Determined by trying to parse the spec of every
-    // assignment in the manifest
+    // Determined by trying to parse the spec of every assignment in the manifest
     pub catalog: HashMap<String, Result<AsgnSpec, Error>>,
 }
 
@@ -84,26 +81,27 @@ impl Context {
     fn load(base_path: &Path) -> Result<CourseToml, Error> {
         let course_file_path = base_path.join(".info").join("course.toml");
 
-        let course_file_text = fs::read_to_string(course_file_path).map_err(|err|
-            Error::NoSpec("course".into(), err.to_string())
+        let course_file_text = fs::read_to_string(&course_file_path).map_err(|err|
+            Error::SpecIo(course_file_path.clone(), err.kind())
         )?;
 
         toml::from_str(&course_file_text).map_err(|err|
-            Error::BadSpec("course".into(), err.to_string())
+            Error::InvalidToml(course_file_path, err)
         )
     }
 
     pub fn sync(&self) -> Result<(), Error> {
-        use Error::*;
         let course_file_path = self.base_path.join(".info").join("course.toml");
 
         let course_toml = CourseToml::from(self);
 
         let toml_text = toml::to_string(&course_toml).map_err(|err|
-            IOFail(format!("Could not serialize course spec: {}", err))
+            Error::TomlSer("CourseToml", err)
         )?;
 
-        util::write_file(course_file_path, toml_text)
+        fs::write(&course_file_path, toml_text).map_err(|err|
+            Error::Io("Failed writing course file", course_file_path, err.kind())
+        )
     }
 
     pub fn populate_catalog(&mut self) {
@@ -115,19 +113,20 @@ impl Context {
 
     pub fn catalog_get<'a>(&'a self, asgn_name: &str) -> Result<&'a AsgnSpec, Error> {
         self.catalog.get(asgn_name)
-            .ok_or(Error::InvalidAsgn(asgn_name.to_owned()))?
+            .ok_or(Error::InvalidAsgn { name: asgn_name.to_owned() })?
             .as_ref()
             .map_err(Clone::clone)
     }
 
     pub fn catalog_get_mut<'a>(&'a mut self, asgn_name: &str) -> Result<&'a mut AsgnSpec, Error> {
         self.catalog.get_mut(asgn_name)
-            .ok_or(Error::InvalidAsgn(asgn_name.to_owned()))?
+            .ok_or(Error::InvalidAsgn { name: asgn_name.to_owned() })?
             .as_mut()
             .map_err(|err| err.clone())
     }
 
     pub fn deduce(base_path: impl AsRef<Path>) -> Result<Self, Error> {
+        const PROC_SELF_EXE: &str = "/proc/self/exe";
         let base_path = base_path.as_ref().canonicalize().unwrap();
 
         let uid = get_current_uid();
@@ -136,10 +135,10 @@ impl Context {
             .name().to_str().unwrap()
             .to_owned();
 
-        let cwd = current_dir().map_err(|_| Error::InvalidCWD())?;
+        let cwd = current_dir().map_err(|_| Error::InvalidCWD)?;
 
-        let exe_path = std::fs::read_link("/proc/self/exe").map_err(|err|
-            Error::IOFail(err.to_string())
+        let exe_path = std::fs::read_link(PROC_SELF_EXE).map_err(|err|
+            Error::Io("Failed to read process' EXE path", PathBuf::from(PROC_SELF_EXE), err.kind())
         )?;
 
         if !base_path.is_dir() {
@@ -147,7 +146,7 @@ impl Context {
         }
 
         let instructor_uid = std::fs::metadata(&base_path)
-            .map_err(|err| Error::IOFail(err.to_string()))?
+            .map_err(|err| Error::Io("Failed to stat file", base_path.clone(), err.kind()))?
             .uid();
 
         let instructor = get_user_by_uid(instructor_uid)
@@ -212,10 +211,9 @@ impl Context {
         println!("Called from directory {}", self.cwd.display());
     }
 
-    fn make_dir_public<P: AsRef<Path>, L : AsRef<str>>(path: P, label: L) -> Result<(), Error> {
-        let label = label.as_ref();
+    fn make_dir_public<P: AsRef<Path>, L: AsRef<str>>(path: impl AsRef<Path>) -> Result<(), Error> {
         let mut perm = fs::metadata(path.as_ref())
-            .map_err(|err| Error::IOFail(format!("Failed chmoding {label}: {err}")))?
+            .map_err(|err| Error::Io("Failed to stat file", path.as_ref().to_owned(), err.kind()))?
             .permissions();
 
         perm.set_mode(0o755);
@@ -342,18 +340,18 @@ impl Context {
     }
 
     fn offset_date(date: Option<&DateTime<Local>>, offset: i64) -> Result<Option<DateTime<Local>>, Error> {
-        if let Some(date) = date.as_ref() {
+        if let Some(&date) = date {
             let offset_date = if offset >= 0 {
                 date.naive_local()
                     .checked_add_days(Days::new(offset as u64))
-                    .ok_or(Error::IOFail("Extended date out of valid range.".to_owned()))?
+                    .ok_or(Error::DateOutOfRange(date))?
             } else {
                 date.naive_local()
                     .checked_sub_days(Days::new(-offset as u64))
-                    .ok_or(Error::IOFail("Extended date out of valid range.".to_owned()))?
+                    .ok_or(Error::DateOutOfRange(date))?
             };
             let offset_date = Local.from_local_datetime(&offset_date).single()
-                .ok_or(Error::IOFail("Extended date out of valid range.".to_owned()))?;
+                .ok_or(Error::DateOutOfRange(date))?;
 
             Ok(Some(offset_date))
         } else {
@@ -374,7 +372,7 @@ impl Context {
         let naive_due_date = asgn.due_date.map(|due| {
             let date = due.date_naive();
             match due.time() {
-                DEFAULT_DUE_TIME => date.to_string(),
+                util::DEFAULT_DUE_TIME => date.to_string(),
                 time => format!("{date} {time}"),
             }
         });
@@ -385,7 +383,7 @@ impl Context {
             active.to_string(),
             visible.to_string(),
             Table::option_repr(naive_due_date),
-            asgn.file_list.iter().join("  "),
+            asgn.file_list.iter().map(|f| f.display()).join("  "),
         ]
     }
 
@@ -432,7 +430,7 @@ impl Context {
         let naive_due_date = due_date.map(|due| {
             let date = due.date_naive();
             match due.time() {
-                DEFAULT_DUE_TIME => due.to_string(),
+                util::DEFAULT_DUE_TIME => due.to_string(),
                 time => format!("{date} {time}"),
             }
         });
@@ -442,21 +440,21 @@ impl Context {
             active.to_owned(),
             Table::option_repr(naive_due_date),
             lateness,
-            asgn.file_list.iter().join("  ")
+            asgn.file_list.iter().map(|f| f.display()).join("  ")
         ])
     }
 
-    pub fn list_subs(&self, asgn: Option<&str>, username: Option<&str>) -> Result<(), Error> {
+    pub fn list_subs(&self, asgn_name: Option<&str>, username: Option<&str>) -> Result<(), Error> {
         let header = ["ASSIGNMENT", "USER", "SUBMISSION STATUS", "EXTENSION", "GRACE"].map(str::to_owned);
 
         let mut table = Table::new(header);
 
-        let asgn_names: Vec<_> = match asgn {
-            Some(asgn_name) => {
-                if !self.manifest.iter().any(|asgn| asgn == asgn_name) {
-                    return Err(Error::InvalidAsgn(asgn_name.to_owned()))
+        let asgn_names: Vec<_> = match asgn_name {
+            Some(name) => {
+                if !self.manifest.iter().any(|asgn| asgn == name) {
+                    return Err(Error::InvalidAsgn { name: name.to_owned() })
                 }
-                vec![asgn_name]
+                vec![name]
             }
             None => self.manifest.iter().map(String::as_str).collect(),
         };
