@@ -42,12 +42,6 @@ impl Table {
         )
     }
 
-    pub fn as_csv(&self) -> String {
-        self.rows.iter()
-            .map(|row| row.iter().join(","))
-            .join("\n")
-    }
-
     pub fn option_repr(value: Option<impl fmt::Display>) -> String {
         value.as_ref().map(ToString::to_string).unwrap_or_else(|| Self::NONE_REPR.to_owned())
     }

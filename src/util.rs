@@ -1,4 +1,3 @@
-use dirs;
 use itertools::Itertools;
 
 use std::{
@@ -13,7 +12,6 @@ use std::{
 
 use crate::error::Error;
 
-use toml;
 use termion::terminal_size;
 use walkdir::WalkDir;
 use chrono::{Datelike, Timelike};

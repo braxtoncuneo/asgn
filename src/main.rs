@@ -1,11 +1,11 @@
 #![feature(const_option)]
 
-pub mod act;
-pub mod asgn_spec;
-pub mod context;
-pub mod error;
-pub mod util;
-pub mod table;
+mod act;
+mod asgn_spec;
+mod context;
+mod error;
+mod util;
+mod table;
 
 use structopt::StructOpt;
 use error::Error;

@@ -9,7 +9,6 @@ use itertools::Itertools;
 use serde_derive::{Serialize, Deserialize};
 use chrono::{DateTime, Local, TimeZone, Duration};
 use users::get_user_by_uid;
-use toml;
 
 use crate::{
     error::{Error, FilePresenceErrorKind, CONTACT_INSTRUCTOR},

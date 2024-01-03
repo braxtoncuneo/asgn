@@ -92,7 +92,6 @@ pub enum StudentAct {
     },
 }
 
-#[allow(dead_code)]
 impl StudentAct {
     fn copy_dir(dst_dir: impl AsRef<Path>, src_dir: impl AsRef<Path>) -> Result<(), Error> {
         fs::create_dir_all(dst_dir.as_ref()).map_err(|err|
@@ -172,24 +171,6 @@ impl StudentAct {
         }
 
         slot.set_grace(ext_days)
-    }
-
-    fn read_score<T>(asgn : &AsgnSpec, student_name: &str, score_name: &str) -> Result<T, Error>
-    where
-        T: FromStr,
-        <T as FromStr>::Err: fmt::Display,
-    {
-        let path = asgn.path.join(".info").join("ranking").join(student_name).join(score_name);
-        let text = fs::read_to_string(&path).map_err(|err|
-            Error::io("Failed to read score file", path, err)
-        )?;
-
-        T::from_str(&text).map_err(|err|
-            Error::custom(
-                format!("Failed to parse score {score_name} for student {student_name}: {err}"),
-                "Please contact the instructor.",
-            )
-        )
     }
 
     fn rank_specialized<T>(

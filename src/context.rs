@@ -2,8 +2,7 @@
 use std::{
     collections::HashMap,
     env::current_dir,
-    fs,
-    os::unix::fs::{PermissionsExt, MetadataExt},
+    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     iter
 };
@@ -77,7 +76,6 @@ pub struct Context {
     pub catalog: HashMap<String, Result<AsgnSpec, Error>>,
 }
 
-#[allow(dead_code)]
 impl Context {
     fn load(base_path: &Path) -> Result<CourseToml, Error> {
         util::parse_toml_file(base_path.join(".info").join("course.toml"))
@@ -178,32 +176,11 @@ impl Context {
         Ok(context)
     }
 
-    pub fn print_manifest(&self) {
-        for name in &self.manifest {
-            println!("{name}");
-        }
-    }
-
     pub fn all_catalog_errors(&self) -> ErrorLog {
         self.manifest.iter()
             .flat_map(|name| self.catalog[name].as_ref().err())
             .cloned()
             .collect::<ErrorLog>()
-    }
-
-    pub fn announce(&self) {
-        println!("The time is: {}", self.time);
-        println!("The username is: {}", self.username);
-        println!("Called from directory {}", self.cwd.display());
-    }
-
-    fn make_dir_public(path: impl AsRef<Path>) -> Result<(), Error> {
-        let mut perm = fs::metadata(path.as_ref())
-            .map_err(|err| Error::io("Failed to stat file", path, err))?
-            .permissions();
-
-        perm.set_mode(0o755);
-        Ok(())
     }
 
     pub fn grader_facl(&self, student: Option<&str>) -> Result<Vec<util::FaclEntry>, Error> {

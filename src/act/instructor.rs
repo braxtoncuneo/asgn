@@ -212,7 +212,6 @@ pub enum InstructorAct {
     Refresh {},
 }
 
-#[allow(dead_code)]
 impl InstructorAct {
     fn add_students(usernames: Vec<String>, context: &mut Context) -> Result<(), Error> {
         for username in usernames {
@@ -319,12 +318,6 @@ impl InstructorAct {
 
     fn grace_limit(limit: i64, context: &mut Context) -> Result<(), Error> {
         context.grace_limit = Some(limit);
-        context.sync()
-    }
-
-    fn no_grace(context: &mut Context) -> Result<(), Error> {
-        context.grace_total = None;
-        context.grace_limit = None;
         context.sync()
     }
 

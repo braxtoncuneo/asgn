@@ -257,10 +257,6 @@ impl fmt::Display for Error {
 pub struct ErrorLog(Vec<Error>);
 
 impl ErrorLog {
-    pub fn new() -> Self {
-        Self(Vec::new())
-    }
-
     pub fn push(&mut self, info: Error) {
         self.0.push(info);
     }
