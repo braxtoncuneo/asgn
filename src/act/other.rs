@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use structopt::StructOpt;
 
-use crate::{context::Context, error::Error, util};
+use crate::{context::Context, error::Error, fs_ext};
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -31,7 +31,7 @@ impl OtherAct {
     fn install(context: &Context) -> Result<(), Error> {
         let new_path = context.exe_path.parent().unwrap().to_str().unwrap();
         let path_append = format!("PATH=\"{new_path}:$PATH\"");
-        util::bashrc_append_line(&path_append)
+        fs_ext::bashrc_append_line(&path_append)
     }
 
     pub fn execute(&self, context: &Context) -> Result<(), Error> {

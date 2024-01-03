@@ -1,8 +1,8 @@
 use std::{
     fs,
     path::{PathBuf, Path},
-    process::Stdio,
-    os::unix::fs::MetadataExt,
+    process::{Stdio, Command, ExitStatus},
+    os::unix::fs::MetadataExt, io,
 };
 
 use itertools::Itertools;
@@ -13,14 +13,15 @@ use users::get_user_by_uid;
 use crate::{
     error::{Error, FilePresenceErrorKind, CONTACT_INSTRUCTOR},
     context::{Context, Role},
-    util::{
+    print::{
         self,
         color::{FG_YELLOW, TEXT_BOLD, STYLE_RESET, FG_GREEN, FG_RED},
-        ChronoDateTimeExt,
-        TomlDatetimeExt,
     },
     table::Table,
+    toml_ext::{ChronoDateTimeExt, TomlDatetimeExt, self}, fs_ext,
 };
+
+pub const DEFAULT_DUE_TIME: chrono::NaiveTime = chrono::NaiveTime::from_hms_opt(23, 59, 59).unwrap();
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Rule {
@@ -191,7 +192,7 @@ impl AsgnSpec {
 
     pub fn load(path: impl AsRef<Path>) -> Result<Self, Error> {
         let path = path.as_ref();
-        let spec_toml: AsgnSpecToml = util::parse_toml_file(path.join(".info").join("info.toml"))?;
+        let spec_toml: AsgnSpecToml = toml_ext::parse_file(path.join(".info").join("info.toml"))?;
 
         let spec = Self::from_toml(path.to_owned(), spec_toml)?;
 
@@ -204,7 +205,7 @@ impl AsgnSpec {
 
     pub fn modify_synced(&mut self, f: impl FnOnce(&mut Self)) -> Result<(), Error> {
         f(self);
-        util::write_toml_file(
+        toml_ext::write_file(
             &AsgnSpecToml::from(&*self),
             self.path.join(".info").join("info.toml"),
         )
@@ -300,7 +301,7 @@ impl AsgnSpec {
         cmd.stdout(Stdio::inherit());
         cmd.stderr(Stdio::inherit());
 
-        let status = util::run_at(cmd, path, false).map_err(|_| SubmissionFatal)?;
+        let status = run_at(cmd, path, false).map_err(|_| SubmissionFatal)?;
 
         if status.success() {
             print!("{FG_GREEN}! ");
@@ -312,7 +313,7 @@ impl AsgnSpec {
 
             let target = path.join(&rule.target);
             if target.exists() {
-                let _ = util::refresh_file(target, 0o777, "");
+                let _ = fs_ext::refresh_file(target, 0o777, "");
             }
 
             Ok(true)
@@ -379,7 +380,7 @@ impl AsgnSpec {
 
         for mut rule in ruleset.rules.iter().cloned() {
             rule.fail_okay.get_or_insert(ruleset.fail_okay.unwrap_or(false));
-            println!("{}", util::Hline::Normal);
+            println!("{}", print::Hline::Normal);
             let mut did_pass: bool = false;
 
             match self.run_rule(context, &rule, path) {
@@ -415,7 +416,7 @@ impl AsgnSpec {
         if fatal {
             println!("{FG_RED}! Execution cannot continue beyond this error.{STYLE_RESET}");
         }
-        println!("{}", util::Hline::Normal);
+        println!("{}", print::Hline::Normal);
         let not_reached = count-passed-failed;
         println!("! {count} total targets - {passed} passed, {failed} failed, {not_reached} not reached.");
 
@@ -437,7 +438,7 @@ impl AsgnSpec {
     {
         match ruleset {
             Some(Ruleset { on_submit: Some(true) | None, .. }) => {
-                println!("{}", util::Hline::Bold);
+                println!("{}", print::Hline::Bold);
                 println!("{FG_YELLOW}{TEXT_BOLD}{title}{STYLE_RESET}");
                 Some(self.run_ruleset(context, ruleset, path, is_metric))
             }
@@ -456,7 +457,7 @@ impl AsgnSpec {
     {
         match ruleset {
             Some(Ruleset { on_grade: Some(true) | None, .. }) => {
-                println!("{}", util::Hline::Bold);
+                println!("{}", print::Hline::Bold);
                 println!("{FG_YELLOW}{TEXT_BOLD}{title}{STYLE_RESET}");
                 Some(self.run_ruleset(context, ruleset, path, is_metric))
             }
@@ -549,13 +550,13 @@ impl<'ctx> SubmissionSlot<'ctx> {
             return Ok(0);
         }
 
-        let grace: GraceToml = util::parse_toml_file(path)?;
+        let grace: GraceToml = toml_ext::parse_file(path)?;
 
         Ok(grace.value)
     }
 
     pub fn set_grace(&self, value: i64) -> Result<(), Error> {
-        util::write_toml_file(&GraceToml { value }, self.grace_path())
+        toml_ext::write_file(&GraceToml { value }, self.grace_path())
     }
 
     pub fn get_extension(&self) -> Result<i64, Error> {
@@ -578,13 +579,13 @@ impl<'ctx> SubmissionSlot<'ctx> {
             return Err(Error::file_presence(&ext_path, FilePresenceErrorKind::NotFound));
         }
 
-        let ext: ExtensionToml = util::parse_toml_file(ext_path)?;
+        let ext: ExtensionToml = toml_ext::parse_file(ext_path)?;
 
         Ok(ext.value)
     }
 
     pub fn set_extension(&self, value: i64) -> Result<(), Error> {
-        util::write_toml_file(&ExtensionToml { value }, self.extension_path())
+        toml_ext::write_file(&ExtensionToml { value }, self.extension_path())
     }
 
     pub fn status(&self) -> Result<SubmissionStatus, Error> {
@@ -664,4 +665,27 @@ impl StatBlockSet {
     pub fn get_block(&self, username: &str) -> Option<&StatBlock> {
         self.stat_block.iter().flatten().find(|block| block.username == username)
     }
+}
+
+fn run_at(mut cmd: Command, path: impl AsRef<Path>, pipe_stdout: bool) -> Result<ExitStatus, Error> {
+    let cmd = cmd.current_dir(path.as_ref());
+    let program = cmd.get_program().to_owned().into_string().unwrap();
+    let make_err = |err: io::Error| Error::command(&program, err);
+
+    let output = if pipe_stdout {
+        cmd
+            .stdout(Stdio::inherit())
+            .spawn()
+            .map_err(make_err)?
+            .wait_with_output()
+            .map_err(make_err)?
+    } else {
+        cmd
+            .output()
+            .map_err(make_err)?
+    };
+
+    let status = output.status;
+
+    Ok(status)
 }

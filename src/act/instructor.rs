@@ -5,12 +5,8 @@ use crate:: {
     error:: {ErrorLog, Error},
     asgn_spec::{AsgnSpec, StatBlock, StatBlockSet},
     act::{student::StudentAct, grader::GraderAct},
-    util::{
-        self,
-        color::{FG_YELLOW, TEXT_BOLD, STYLE_RESET},
-        TomlDatetimeExt,
-        ChronoDateTimeExt,
-    },
+    print::color::{FG_YELLOW, TEXT_BOLD, STYLE_RESET},
+    toml_ext::{self, TomlDatetimeExt, ChronoDateTimeExt},
 };
 
 use structopt::StructOpt;
@@ -264,7 +260,7 @@ impl InstructorAct {
     }
 
     fn set_due(asgn_name: &str, date: &str, context: &mut Context) -> Result<(), Error> {
-        let date = util::parse_toml_date_as_chrono(date)?;
+        let date = toml_ext::parse_date_to_chrono(date)?;
 
         context.catalog_get_mut(asgn_name)?.modify_synced(|spec|
             spec.due_date = Some(date)
@@ -272,7 +268,7 @@ impl InstructorAct {
     }
 
     fn set_open(asgn_name: &str, date: &str, context: &mut Context) -> Result<(), Error> {
-        let date = util::parse_toml_date_as_chrono(date)?;
+        let date = toml_ext::parse_date_to_chrono(date)?;
 
         context.catalog_get_mut(asgn_name)?.modify_synced(|spec|
             spec.open_date = Some(date)
@@ -280,7 +276,7 @@ impl InstructorAct {
     }
 
     fn set_close(asgn_name: &str, date: &str, context: &mut Context) -> Result<(), Error> {
-        let date = util::parse_toml_date_as_chrono(date)?;
+        let date = toml_ext::parse_date_to_chrono(date)?;
 
         context.catalog_get_mut(asgn_name)?.modify_synced(|spec|
             spec.close_date = Some(date)
@@ -398,7 +394,7 @@ impl InstructorAct {
         let info_path = spec.path.join(".info");
         let stat_path = &info_path.join("score.toml");
 
-        let old_stats: StatBlockSet = util::parse_toml_file(stat_path)?;
+        let old_stats: StatBlockSet = toml_ext::parse_file(stat_path)?;
         let new_stats: StatBlockSet = {
             let build_path = info_path.join(".internal").join("score_build");
             let build_dir = tempdir_in(&build_path).map_err(|err|
@@ -421,7 +417,7 @@ impl InstructorAct {
             }).collect()
         };
 
-        util::write_toml_file(&new_stats, stat_path)
+        toml_ext::write_file(&new_stats, stat_path)
     }
 
     fn update_all_scores(context: &mut Context) -> Result<(), ErrorLog> {

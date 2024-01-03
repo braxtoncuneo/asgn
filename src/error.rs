@@ -1,6 +1,6 @@
 use std::{fmt, path::Path, io};
 
-use crate::util::color::{FG_RED, FG_YELLOW, STYLE_RESET};
+use crate::print::color::{FG_RED, FG_YELLOW, STYLE_RESET};
 
 pub const CONTACT_INSTRUCTOR: &str = "Please contact the instructor.";
 pub const MAYBE_CONTACT_INSTRUCTOR: &str =

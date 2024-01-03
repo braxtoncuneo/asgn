@@ -4,7 +4,9 @@ mod act;
 mod asgn_spec;
 mod context;
 mod error;
-mod util;
+mod print;
+mod toml_ext;
+mod fs_ext;
 mod table;
 
 use act::{instructor::InstructorCmd, grader::GraderCmd, student::StudentCmd};

@@ -1,6 +1,6 @@
 use core::fmt;
 
-use crate::{error, util::color::{STYLE_RESET, COLOR_REVERSED, BG_LIGHT_BLACK}};
+use crate::{error, print::color::{STYLE_RESET, COLOR_REVERSED, BG_LIGHT_BLACK}};
 use itertools::Itertools;
 
 #[derive(Clone, Copy, PartialEq, Debug)]

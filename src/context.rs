@@ -14,10 +14,11 @@ use itertools::Itertools;
 
 use crate::{
     error::{Error, ErrorLog},
-    asgn_spec::{AsgnSpec, AsgnSpecToml, SubmissionSlot},
-    util,
+    asgn_spec::{AsgnSpec, AsgnSpecToml, SubmissionSlot, DEFAULT_DUE_TIME},
     table::Table,
     act::instructor::InstructorAct,
+    toml_ext,
+    fs_ext,
 };
 
 #[derive(Default, Serialize, Deserialize)]
@@ -78,12 +79,12 @@ pub struct Context {
 
 impl Context {
     fn load(base_path: &Path) -> Result<CourseToml, Error> {
-        util::parse_toml_file(base_path.join(".info").join("course.toml"))
+        toml_ext::parse_file(base_path.join(".info").join("course.toml"))
     }
 
     pub fn modify_synced(&mut self, f: impl FnOnce(&mut Self)) -> Result<(), Error> {
         f(self);
-        util::write_toml_file(
+        toml_ext::write_file(
             &CourseToml::from(&*self),
             self.base_path.join(".info").join("course.toml"),
         )
@@ -184,10 +185,10 @@ impl Context {
             .collect::<ErrorLog>()
     }
 
-    pub fn grader_facl(&self, student: Option<&str>) -> Result<Vec<util::FaclEntry>, Error> {
-        let mut facl_list: Vec<util::FaclEntry> = Vec::new();
+    pub fn grader_facl(&self, student: Option<&str>) -> Result<Vec<fs_ext::FaclEntry>, Error> {
+        let mut facl_list: Vec<fs_ext::FaclEntry> = Vec::new();
 
-        facl_list.push(util::FaclEntry {
+        facl_list.push(fs_ext::FaclEntry {
             username: self.instructor.clone(),
             read: true,
             write: true,
@@ -195,7 +196,7 @@ impl Context {
         });
 
         if let Some(student) = student {
-            facl_list.push(util::FaclEntry {
+            facl_list.push(fs_ext::FaclEntry {
                 username: student.to_owned(),
                 read: true,
                 write: true,
@@ -205,7 +206,7 @@ impl Context {
 
         let graders_exclusive = self.graders.iter()
             .filter(|&grader| Some(grader.as_str()) != student && grader != &self.instructor)
-            .map(|grader| util::FaclEntry {
+            .map(|grader| fs_ext::FaclEntry {
                 username: grader.to_owned(),
                 read: true,
                 write: false,
@@ -218,14 +219,14 @@ impl Context {
     }
 
     fn refresh_root(&self) -> Result<(), Error> {
-        util::refresh_dir(&self.base_path, 0o755, iter::empty())?;
+        fs_ext::refresh_dir(&self.base_path, 0o755, iter::empty())?;
 
         let course_info_path = self.base_path.join(".info");
         let course_file_path = course_info_path.join("course.toml");
         let course_text = toml::to_string(&CourseToml::default()).unwrap();
 
-        util::refresh_dir(&course_info_path, 0o755, iter::empty())?;
-        util::refresh_file(course_file_path, 0o644, &course_text)?;
+        fs_ext::refresh_dir(&course_info_path, 0o755, iter::empty())?;
+        fs_ext::refresh_file(course_file_path, 0o644, &course_text)?;
 
         let dirs = [
             ("public",  0o755, Vec::new()),
@@ -234,7 +235,7 @@ impl Context {
 
         for (name, flags, facl) in dirs {
             let path = course_info_path.join(name);
-            util::recursive_refresh_dir(&path, flags, facl.iter())?;
+            fs_ext::recursive_refresh_dir(&path, flags, facl.iter())?;
         }
 
         Ok(())
@@ -242,20 +243,20 @@ impl Context {
 
     pub fn refresh_assignment(&self, asgn_name: &str) -> Result<(), Error> {
         let asgn_path = self.base_path.join(asgn_name);
-        util::refresh_dir(&asgn_path, 0o755, iter::empty())?;
+        fs_ext::refresh_dir(&asgn_path, 0o755, iter::empty())?;
 
         let asgn_spec_path = asgn_path.join(".info");
-        util::refresh_dir(&asgn_spec_path, 0o755, iter::empty())?;
+        fs_ext::refresh_dir(&asgn_spec_path, 0o755, iter::empty())?;
 
         let asgn_info_path = asgn_spec_path.join("info.toml");
         let asgn_text = toml::to_string(&AsgnSpecToml::default_with_name(asgn_name.to_owned())).unwrap();
-        util::refresh_file(asgn_info_path, 0o644, &asgn_text)?;
+        fs_ext::refresh_file(asgn_info_path, 0o644, &asgn_text)?;
 
         let asgn_make_path = asgn_spec_path.join("Makefile");
-        util::refresh_file(asgn_make_path, 0o644, "")?;
+        fs_ext::refresh_file(asgn_make_path, 0o644, "")?;
 
         let asgn_make_path = asgn_spec_path.join("score.toml");
-        util::refresh_file(asgn_make_path, 0o644, "")?;
+        fs_ext::refresh_file(asgn_make_path, 0o644, "")?;
 
         let dirs = [
             ("public", 0o755, Vec::new()),
@@ -264,13 +265,13 @@ impl Context {
 
         for (name, flags, facl) in dirs {
             let path = asgn_spec_path.join(name);
-            util::recursive_refresh_dir(&path, flags, facl.iter())?;
+            fs_ext::recursive_refresh_dir(&path, flags, facl.iter())?;
         }
 
         let internal_path = asgn_spec_path.join(".internal");
         let score_build_path = internal_path.join("score_build");
-        util::recursive_refresh_dir(internal_path, 0o700, iter::empty())?;
-        util::recursive_refresh_dir(score_build_path, 0o700, iter::empty())?;
+        fs_ext::recursive_refresh_dir(internal_path, 0o700, iter::empty())?;
+        fs_ext::recursive_refresh_dir(score_build_path, 0o700, iter::empty())?;
 
         let asgn_path = self.base_path.join(asgn_name);
 
@@ -278,10 +279,10 @@ impl Context {
             let asgn_sub_path = asgn_path.join(member);
             let facl_list = self.grader_facl(Some(member))?;
 
-            util::refresh_dir(asgn_sub_path.clone(), 0o700, facl_list.iter())?;
+            fs_ext::refresh_dir(asgn_sub_path.clone(), 0o700, facl_list.iter())?;
 
             let extension_path = asgn_sub_path.join(".extension");
-            util::refresh_file(extension_path, 0o700, "value = 0")?;
+            fs_ext::refresh_file(extension_path, 0o700, "value = 0")?;
         }
 
         Ok(())
@@ -336,7 +337,7 @@ impl Context {
         let naive_due_date = asgn.due_date.map(|due| {
             let date = due.date_naive();
             match due.time() {
-                util::DEFAULT_DUE_TIME => date.to_string(),
+                DEFAULT_DUE_TIME => date.to_string(),
                 time => format!("{date} {time}"),
             }
         });
@@ -394,7 +395,7 @@ impl Context {
         let naive_due_date = due_date.map(|due| {
             let date = due.date_naive();
             match due.time() {
-                util::DEFAULT_DUE_TIME => date.to_string(),
+                DEFAULT_DUE_TIME => date.to_string(),
                 time => format!("{date} {time}"),
             }
         });
@@ -514,13 +515,13 @@ pub fn init(base_path: impl AsRef<Path>) -> Result<(), ErrorLog> {
         ).into());
     }
 
-    util::refresh_dir(base_path, 0o755, iter::empty())?;
+    fs_ext::refresh_dir(base_path, 0o755, iter::empty())?;
 
     let info_path = base_path.join(".info");
-    util::refresh_dir(&info_path, 0o755, iter::empty())?;
+    fs_ext::refresh_dir(&info_path, 0o755, iter::empty())?;
 
     let toml_path = info_path.join("course.toml");
-    util::refresh_file(toml_path, 0o755, &toml::to_string(&CourseToml::default()).unwrap())?;
+    fs_ext::refresh_file(toml_path, 0o755, &toml::to_string(&CourseToml::default()).unwrap())?;
 
     let mut context = Context::deduce(base_path)?;
     InstructorAct::Refresh.execute(&mut context)

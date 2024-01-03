@@ -7,7 +7,8 @@ use crate::{
     asgn_spec::{AsgnSpec, SubmissionFatal},
     context::Context,
     error::{ErrorLog, Error},
-    util::{self, color::{FG_YELLOW, TEXT_BOLD, STYLE_RESET}},
+    print::{self, color::{FG_YELLOW, TEXT_BOLD, STYLE_RESET}},
+    fs_ext,
 };
 
 #[derive(Debug, StructOpt)]
@@ -98,11 +99,11 @@ impl GraderAct {
             return Ok(());
         }
 
-        println!("{}", util::Hline::Bold);
+        println!("{}", print::Hline::Bold);
         println!("{FG_YELLOW}{TEXT_BOLD}Evaluating Grades{STYLE_RESET}");
         let _ = spec.run_ruleset(context, spec.grade.as_ref(), &cwd, true);
 
-        println!("{}", util::Hline::Bold);
+        println!("{}", print::Hline::Bold);
 
         Ok(())
     }
@@ -110,11 +111,11 @@ impl GraderAct {
     fn check(asgn_name: &str, context: &Context) -> Result<(), Error> {
         let spec = context.catalog_get(asgn_name)?;
 
-        println!("{}", util::Hline::Bold);
+        println!("{}", print::Hline::Bold);
         println!("{FG_YELLOW}{TEXT_BOLD}Evaluating Checks{STYLE_RESET}");
         let cwd = context.cwd.clone();
         let _ = spec.run_ruleset(context, spec.check.as_ref(), &cwd, true);
-        println!("{}", util::Hline::Bold);
+        println!("{}", print::Hline::Bold);
 
         Ok(())
     }
@@ -122,11 +123,11 @@ impl GraderAct {
     fn score(asgn_name: &str, context: &Context) -> Result<(), Error> {
         let spec = context.catalog_get(asgn_name)?;
 
-        println!("{}", util::Hline::Bold);
+        println!("{}", print::Hline::Bold);
         println!("{FG_YELLOW}{TEXT_BOLD}Evaluating Scores{STYLE_RESET}");
         let cwd = context.cwd.clone();
         let _ = spec.run_ruleset(context, spec.score.as_ref(), &cwd, true);
-        println!("{}", util::Hline::Bold);
+        println!("{}", print::Hline::Bold);
 
         Ok(())
     }
@@ -134,7 +135,7 @@ impl GraderAct {
     pub fn copy(asgn_name: &str, username: &str, dst_dir: Option<&Path>, context: &Context) -> Result<(), Error> {
         let spec = context.catalog_get(asgn_name)?;
         let dst_dir = dst_dir.unwrap_or(&context.cwd);
-        let dst_dir = util::make_fresh_dir(dst_dir, username);
+        let dst_dir = fs_ext::make_fresh_dir(dst_dir, username);
 
         spec.retrieve_sub(&dst_dir, username)?;
 
@@ -152,22 +153,22 @@ impl GraderAct {
         if score_result == Some(Err(SubmissionFatal)) {
             return Ok(());
         }
-        println!("{}", util::Hline::Bold);
+        println!("{}", print::Hline::Bold);
 
         Ok(())
     }
 
     pub fn copy_all(asgn_name: &str, dst_dir: Option<&Path>, context: &Context) -> Result<(), Error> {
         let dst_dir = dst_dir.map(Path::to_path_buf).unwrap_or(
-            util::make_fresh_dir(&context.cwd, asgn_name)
+            fs_ext::make_fresh_dir(&context.cwd, asgn_name)
         );
-        util::refresh_dir(&dst_dir, 0o700, Vec::new().iter())?;
+        fs_ext::refresh_dir(&dst_dir, 0o700, Vec::new().iter())?;
         for member_name in &context.members {
             println!("{TEXT_BOLD}Retrieving Submission for '{member_name}'{STYLE_RESET}");
             if let Err(err) = Self::copy(asgn_name, member_name, Some(&dst_dir), context) {
-                println!("{}", util::Hline::Bold);
+                println!("{}", print::Hline::Bold);
                 print!("{err}");
-                println!("{}", util::Hline::Bold);
+                println!("{}", print::Hline::Bold);
             }
         }
         Ok(())

@@ -1,6 +1,5 @@
 use structopt::StructOpt;
 use super::other::OtherAct;
-use util::bashrc_append_line;
 
 use std::{fs, path::{Path, PathBuf}, str::FromStr, fmt};
 
@@ -8,8 +7,8 @@ use crate::{
     asgn_spec::{AsgnSpec, Ruleset, StatBlockSet, SubmissionFatal},
     context::{Context, Role},
     error::{Error, ErrorLog, InactiveKind, FilePresenceErrorKind, CONTACT_INSTRUCTOR},
-    util::{self, color::{FG_GREEN, STYLE_RESET, FG_YELLOW}},
-    table::Table,
+    print::{self, color::{FG_GREEN, STYLE_RESET, FG_YELLOW}},
+    table::Table, toml_ext, fs_ext,
 };
 
 #[derive(Debug, StructOpt)]
@@ -192,7 +191,7 @@ impl StudentAct {
 
         let mut rows: Vec<(Option<T>, Vec<String>)> = Vec::new();
 
-        let scores: StatBlockSet = util::parse_toml_file(asgn.path.join(".info").join("score.toml"))?;
+        let scores: StatBlockSet = toml_ext::parse_file(asgn.path.join(".info").join("score.toml"))?;
 
         for member in &context.members {
             let mut row = vec![member.clone()];
@@ -293,11 +292,11 @@ impl StudentAct {
             fs::copy(&src_path, &dst_path).map_err(|err|
                 Error::io("Failed to copy file", src_path, err)
             )?;
-            util::set_mode(&dst_path, 0o777)?;
+            fs_ext::set_mode(&dst_path, 0o777)?;
         }
         log.into_result()?;
 
-        println!("{}", util::Hline::Bold);
+        println!("{}", print::Hline::Bold);
         println!("{FG_GREEN}Assignment '{asgn_name}' submitted!{STYLE_RESET}");
 
         let build_result = spec.run_on_submit(
@@ -333,7 +332,7 @@ impl StudentAct {
             return Ok(());
         }
 
-        println!("{}", util::Hline::Bold);
+        println!("{}", print::Hline::Bold);
         Ok(())
     }
 
@@ -351,7 +350,7 @@ impl StudentAct {
             return Err(Error::no_setup(asgn_name));
         }
 
-        let dst_dir = util::make_fresh_dir(&context.cwd, &format!("{asgn_name}_setup"));
+        let dst_dir = fs_ext::make_fresh_dir(&context.cwd, &format!("{asgn_name}_setup"));
 
         StudentAct::copy_dir(dst_dir, setup_dir)
     }
@@ -362,7 +361,7 @@ impl StudentAct {
         Self::verify_active(spec, context).map_err(Error::from)?;
 
         let sub_dir = context.base_path.join(asgn_name).join(&context.username);
-        let dst_dir = util::make_fresh_dir(&context.cwd, &format!("{asgn_name}_recovery"));
+        let dst_dir = fs_ext::make_fresh_dir(&context.cwd, &format!("{asgn_name}_recovery"));
 
         fs::create_dir_all(&dst_dir).map_err(|err|
             Error::io("Failed to create dir", &dst_dir, err)
@@ -391,7 +390,7 @@ impl StudentAct {
             context.exe_path.display(),
             context.base_path.display(),
         );
-        bashrc_append_line(&line)?;
+        fs_ext::bashrc_append_line(&line)?;
         println!(
 "{FG_YELLOW}Alias installed successfully.
 The alias will be present in future shell sessions.
