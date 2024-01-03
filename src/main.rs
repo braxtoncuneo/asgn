@@ -7,6 +7,7 @@ mod error;
 mod util;
 mod table;
 
+use act::{instructor::InstructorCmd, grader::GraderCmd, student::StudentCmd};
 use structopt::StructOpt;
 use error::Error;
 use context::{Context, Role};
@@ -48,9 +49,9 @@ fn main() {
     };
 
     let result = match &context.role {
-        Role::Instructor => act::instructor::InstructorCmd::from_args().act.execute(&mut context),
-        Role::Grader => act::grader::GraderCmd::from_args().act.execute(&context),
-        Role::Student => act::student::StudentCmd::from_args().act.execute(&context),
+        Role::Instructor => InstructorCmd::from_args().act.execute(&mut context),
+        Role::Grader => GraderCmd::from_args().act.execute(&context),
+        Role::Student => StudentCmd::from_args().act.execute(&context),
         Role::Other => {
             println!("{}", Error::no_such_member(&context.username));
             return;
