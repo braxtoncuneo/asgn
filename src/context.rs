@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf}, iter
 };
 
-use chrono::{TimeZone, DateTime, Local, Days, NaiveTime, Timelike};
+use chrono::{TimeZone, DateTime, Local, Days, NaiveTime};
 use users::{ get_user_by_uid, get_current_uid};
 use serde_derive::{ Serialize, Deserialize};
 use itertools::Itertools;
