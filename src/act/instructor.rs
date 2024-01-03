@@ -1,7 +1,4 @@
-use std::{
-    str::FromStr,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use crate:: {
     context::Context,
@@ -209,164 +206,168 @@ pub enum InstructorAct {
     },
 
     #[structopt(about = "[instructors only] attempts to fix the state of the course directory")]
-    Refresh {},
+    Refresh,
 }
 
 impl InstructorAct {
     fn add_students(usernames: Vec<String>, context: &mut Context) -> Result<(), Error> {
-        for username in usernames {
-            if !context.students.iter().any(|student| student == &username) {
-                context.students.push(username);
+        context.modify_synced(|ctx|
+            for username in usernames {
+                if !ctx.students.iter().any(|student| student == &username) {
+                    ctx.students.push(username);
+                }
             }
-        }
-        context.sync()?;
+        )?;
         context.refresh()
     }
 
     fn remove_students(usernames: &[String], context: &mut Context) -> Result<(), Error> {
-        context.students.retain(|student| !usernames.contains(student));
-        context.sync()
+        context.modify_synced(|ctx|
+            ctx.students.retain(|student| !usernames.contains(student))
+        )
     }
 
     fn add_graders(usernames: Vec<String>, context: &mut Context) -> Result<(), Error> {
-        for username in usernames {
-            if !context.graders.iter().any(|grader| grader == &username) {
-                context.graders.push(username);
+        context.modify_synced(|ctx|
+            for username in usernames {
+                if !ctx.graders.iter().any(|grader| grader == &username) {
+                    ctx.graders.push(username);
+                }
             }
-        }
-        context.sync()?;
+        )?;
         context.refresh()
     }
 
     fn remove_graders(usernames: &[String], context: &mut Context) -> Result<(), Error> {
-        context.graders.retain(|grader| !usernames.contains(grader));
-        context.sync()
+        context.modify_synced(|ctx|
+            ctx.graders.retain(|grader| !usernames.contains(grader))
+        )
     }
 
     fn add_assignments(asgn_names: Vec<String>, context: &mut Context) -> Result<(), Error> {
-        for asgn_name in asgn_names {
-            if !context.manifest.iter().any(|assignment| assignment == &asgn_name) {
-                context.manifest.push(asgn_name);
+        context.modify_synced(|ctx|
+            for asgn_name in asgn_names {
+                if !ctx.manifest.iter().any(|assignment| assignment == &asgn_name) {
+                    ctx.manifest.push(asgn_name);
+                }
             }
-        }
-        context.sync()?;
+        )?;
         context.refresh()?;
         context.populate_catalog();
         Ok(())
     }
 
     fn remove_assignments(asgn_names: &[String], context: &mut Context) -> Result<(), Error> {
-        context.manifest.retain(|name| !asgn_names.contains(name));
-        context.sync()
+        context.modify_synced(|ctx|
+            ctx.manifest.retain(|name| !asgn_names.contains(name))
+        )
     }
 
     fn set_due(asgn_name: &str, date: &str, context: &mut Context) -> Result<(), Error> {
-        let spec = context.catalog_get_mut(asgn_name)?;
-        let toml_date = toml::value::Datetime::from_str(date).map_err(|_|
-            Error::invalid_date(date)
-        )?;
-        spec.due_date = Some(toml_date.try_into_chrono_date_time().ok_or_else(||
-            Error::bad_spec(&spec.path, "Missing due date")
-        )?);
-        spec.sync()
+        let date = util::parse_toml_date_as_chrono(date)?;
+
+        context.catalog_get_mut(asgn_name)?.modify_synced(|spec|
+            spec.due_date = Some(date)
+        )
     }
 
     fn set_open(asgn_name: &str, date: &str, context: &mut Context) -> Result<(), Error> {
-        let spec = context.catalog_get_mut(asgn_name)?;
-        let toml_date = toml::value::Datetime::from_str(date).map_err(|_|
-            Error::invalid_date(date)
-        )?;
-        spec.open_date = Some(toml_date.try_into_chrono_date_time().ok_or_else(||
-            Error::bad_spec(&spec.path, "Missing open date")
-        )?);
-        spec.sync()
+        let date = util::parse_toml_date_as_chrono(date)?;
+
+        context.catalog_get_mut(asgn_name)?.modify_synced(|spec|
+            spec.open_date = Some(date)
+        )
     }
 
     fn set_close(asgn_name: &str, date: &str, context: &mut Context) -> Result<(), Error> {
-        let spec = context.catalog_get_mut(asgn_name)?;
-        let toml_date = toml::value::Datetime::from_str(date).map_err(|_|
-            Error::invalid_date(date)
-        )?;
-        spec.close_date = Some(toml_date.try_into_chrono_date_time().ok_or_else(||
-            Error::bad_spec(&spec.path, "Missing close date")
-        )?);
-        spec.sync()
+        let date = util::parse_toml_date_as_chrono(date)?;
+
+        context.catalog_get_mut(asgn_name)?.modify_synced(|spec|
+            spec.close_date = Some(date)
+        )
     }
 
     fn unset_due(asgn_name: &str, context: &mut Context) -> Result<(), Error> {
-        let spec = context.catalog_get_mut(asgn_name)?;
-        spec.due_date = None;
-        spec.sync()
+        context.catalog_get_mut(asgn_name)?.modify_synced(|spec|
+            spec.due_date = None
+        )
     }
 
     fn unset_open(asgn_name: &str, context: &mut Context) -> Result<(), Error> {
-        let spec = context.catalog_get_mut(asgn_name)?;
-        spec.open_date = None;
-        spec.sync()
+        context.catalog_get_mut(asgn_name)?.modify_synced(|spec|
+            spec.open_date = None
+        )
     }
 
     fn unset_close(asgn_name: &str, context: &mut Context) -> Result<(), Error> {
-        let spec= context.catalog_get_mut(asgn_name)?;
-        spec.close_date = None;
-        spec.sync()
+        context.catalog_get_mut(asgn_name)?.modify_synced(|spec|
+            spec.close_date = None
+        )
     }
 
     fn grace_total(total: i64, context: &mut Context) -> Result<(), Error> {
-        context.grace_total = Some(total);
-        context.sync()
+        context.modify_synced(|ctx|
+            ctx.grace_total = Some(total)
+        )
     }
 
     fn grace_limit(limit: i64, context: &mut Context) -> Result<(), Error> {
-        context.grace_limit = Some(limit);
-        context.sync()
+        context.modify_synced(|ctx|
+            ctx.grace_limit = Some(limit)
+        )
     }
 
     fn publish(asgn_name: &str, context: &mut Context) -> Result<(), Error> {
-        let spec = context.catalog_get_mut(asgn_name)?;
-        spec.visible = true;
-        spec.sync()
+        context.catalog_get_mut(asgn_name)?.modify_synced(|spec|
+            spec.visible = true
+        )
     }
 
     fn unpublish(asgn_name: &str, context: &mut Context) -> Result<(), Error> {
-        let spec = context.catalog_get_mut(asgn_name)?;
-        spec.visible = false;
-        spec.sync()
+        context.catalog_get_mut(asgn_name)?.modify_synced(|spec|
+            spec.visible = false
+        )
     }
 
     fn enable(asgn_name: &str, context: &mut Context) -> Result<(), Error> {
-        let spec = context.catalog_get_mut(asgn_name)?;
-        spec.active = true;
-        spec.sync()
+        context.catalog_get_mut(asgn_name)?.modify_synced(|spec|
+            spec.active = true
+        )
     }
 
     fn disable(asgn_name: &str, context: &mut Context) -> Result<(), Error> {
-        let spec = context.catalog_get_mut(asgn_name)?;
-        spec.active = false;
-        spec.sync()
+        context.catalog_get_mut(asgn_name)?.modify_synced(|spec|
+            spec.active = false
+        )
     }
 
     fn extend(asgn_name: &str, username: &str, ext_days: i64, context : &Context) -> Result<(), Error> {
-        let spec: &AsgnSpec = context.catalog_get(asgn_name)?;
+        let spec = context.catalog_get(asgn_name)?;
         let slot = context.get_slot(spec, username);
         slot.set_extension(ext_days)
     }
 
-    fn latest_score(old_stats: &StatBlockSet, username: &str, build_root: &Path, asgn: &AsgnSpec, context: &Context)
-    -> Result<Option<StatBlock>, Error>
+    fn latest_score(
+        old_stats: &StatBlockSet,
+        username: &str,
+        build_root: &Path,
+        asgn: &AsgnSpec,
+        context: &Context
+    ) -> Result<Option<StatBlock>, Error>
     {
-        let slot = context.get_slot(asgn, username);
-        let status = slot.status().unwrap();
-
-        let Some(turn_in_time) = status.turn_in_time else {
+        let Some(turn_in_time) = context
+            .get_slot(asgn, username)
+            .status().unwrap()
+            .turn_in_time
+        else {
             return Ok(None);
         };
 
-        let stats = old_stats.get_block(username);
-
-        if let Some(stats) = stats {
+        if let Some(stats) = old_stats.get_block(username) {
             let old_time = stats.time.try_into_chrono_date_time().ok_or_else(||
                 Error::bad_stats(username, "Missing date")
             )?;
+
             if turn_in_time.signed_duration_since(old_time) <= Duration::seconds(1) {
                 println!("{FG_YELLOW}{TEXT_BOLD}{username} is already up-to-date.{STYLE_RESET}");
                 return Ok(Some(stats.clone()));
@@ -375,49 +376,50 @@ impl InstructorAct {
 
         let build_path = build_root.join(username);
         asgn.retrieve_sub(&build_path, username)?;
-        if ! build_root.exists() {
+        if !build_root.exists() {
             println!("{} does not exist!", build_root.display());
         }
-        if ! build_path.exists() {
+        if !build_path.exists() {
             println!("{} does not exist!", build_path.display());
         }
         let _ = asgn.run_ruleset(context, asgn.build.as_ref(), &build_path, false);
 
         let scores = asgn.run_ruleset(context, asgn.score.as_ref(), &build_path, true).unwrap_or_default();
 
-        let stat_block = StatBlock {
+        Ok(Some(StatBlock {
             username: username.to_owned(),
             time: turn_in_time.to_toml_datetime(),
             scores
-        };
-
-        Ok(Some(stat_block))
+        }))
     }
 
     fn update_scores(asgn_name: &str, context: &mut Context) -> Result<(), Error> {
         let spec = context.catalog_get(asgn_name)?;
         let info_path = spec.path.join(".info");
-        let build_path = info_path.join(".internal").join("score_build");
-        let build_path = tempdir_in(build_path.clone()).map_err(|err|
-            Error::io("Failed to create temp dir", build_path, err)
-        )?;
+        let stat_path = &info_path.join("score.toml");
 
-        let stat_path = info_path.join("score.toml");
-        let old_stats: StatBlockSet = util::parse_toml_file(&stat_path)?;
+        let old_stats: StatBlockSet = util::parse_toml_file(stat_path)?;
+        let new_stats: StatBlockSet = {
+            let build_path = info_path.join(".internal").join("score_build");
+            let build_dir = tempdir_in(&build_path).map_err(|err|
+                Error::io("Failed to create temp dir", build_path, err)
+            )?;
 
-        let mut new_stats: StatBlockSet = Default::default();
-
-        for member in &context.members {
-            match Self::latest_score(&old_stats, member, build_path.path(), spec, context) {
-                Ok(Some(block)) => if new_stats.stat_block.is_some() {
-                    new_stats.stat_block.as_mut().unwrap().push(block);
-                } else {
-                    new_stats.stat_block = Some(vec![block]);
+            context.members.iter().filter_map(|member| {
+                let score = Self::latest_score(&old_stats, member, build_dir.path(), spec, context);
+                match score {
+                    Ok(Some(score)) => Some(score),
+                    Ok(None) => {
+                        println!("{FG_YELLOW}{TEXT_BOLD}{member} has no submission.{STYLE_RESET}");
+                        None
+                    }
+                    Err(err) => {
+                        print!("{err}");
+                        None
+                    }
                 }
-                Err(log) => print!("{log}"),
-                _ => println!("{FG_YELLOW}{TEXT_BOLD}{member} has no submission.{STYLE_RESET}"),
-            }
-        }
+            }).collect()
+        };
 
         util::write_toml_file(&new_stats, stat_path)
     }

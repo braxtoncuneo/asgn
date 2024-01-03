@@ -55,6 +55,14 @@ pub struct StatBlockSet {
     pub stat_block: Option<Vec<StatBlock>>
 }
 
+impl FromIterator<StatBlock> for StatBlockSet {
+    fn from_iter<T: IntoIterator<Item=StatBlock>>(iter: T) -> Self {
+        Self {
+            stat_block: Some(iter.into_iter().collect())
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct SubmissionFatal;
 
@@ -105,29 +113,23 @@ impl AsgnSpecToml {
     }
 }
 
-impl From<AsgnSpec> for AsgnSpecToml {
-    fn from(spec: AsgnSpec) -> Self {
+impl From<&AsgnSpec> for AsgnSpecToml {
+    fn from(spec: &AsgnSpec) -> Self {
         AsgnSpecToml {
-            name: spec.name,
-            active: spec.active,
-            visible: spec.visible,
+            name: spec.name.clone(),
+            active: spec.active.clone(),
+            visible: spec.visible.clone(),
             file_list: spec.file_list.clone(),
 
-            build: spec.build,
-            check: spec.check,
-            grade: spec.grade,
-            score: spec.score,
+            build: spec.build.clone(),
+            check: spec.check.clone(),
+            grade: spec.grade.clone(),
+            score: spec.score.clone(),
 
             due_date:   spec.due_date  .map(|d| d.to_toml_datetime()),
             open_date:  spec.open_date .map(|d| d.to_toml_datetime()),
             close_date: spec.close_date.map(|d| d.to_toml_datetime()),
         }
-    }
-}
-
-impl From<&AsgnSpec> for AsgnSpecToml {
-    fn from(spec: &AsgnSpec) -> Self {
-        Self::from(spec.clone())
     }
 }
 
@@ -189,10 +191,7 @@ impl AsgnSpec {
 
     pub fn load(path: impl AsRef<Path>) -> Result<Self, Error> {
         let path = path.as_ref();
-        let spec_path = path.join(".info");
-        let info_path = spec_path.join("info.toml");
-
-        let spec_toml: AsgnSpecToml = util::parse_toml_file(info_path)?;
+        let spec_toml: AsgnSpecToml = util::parse_toml_file(path.join(".info").join("info.toml"))?;
 
         let spec = Self::from_toml(path.to_owned(), spec_toml)?;
 
@@ -203,9 +202,10 @@ impl AsgnSpec {
         Ok(spec)
     }
 
-    pub fn sync(&self) -> Result<(), Error>{
+    pub fn modify_synced(&mut self, f: impl FnOnce(&mut Self)) -> Result<(), Error> {
+        f(self);
         util::write_toml_file(
-            &AsgnSpecToml::from(self),
+            &AsgnSpecToml::from(&*self),
             self.path.join(".info").join("info.toml"),
         )
     }

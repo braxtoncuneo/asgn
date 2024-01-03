@@ -81,9 +81,10 @@ impl Context {
         util::parse_toml_file(base_path.join(".info").join("course.toml"))
     }
 
-    pub fn sync(&self) -> Result<(), Error> {
+    pub fn modify_synced(&mut self, f: impl FnOnce(&mut Self)) -> Result<(), Error> {
+        f(self);
         util::write_toml_file(
-            &CourseToml::from(self),
+            &CourseToml::from(&*self),
             self.base_path.join(".info").join("course.toml"),
         )
     }
@@ -522,5 +523,5 @@ pub fn init(base_path: impl AsRef<Path>) -> Result<(), ErrorLog> {
     util::refresh_file(toml_path, 0o755, &toml::to_string(&CourseToml::default()).unwrap())?;
 
     let mut context = Context::deduce(base_path)?;
-    InstructorAct::Refresh{}.execute(&mut context)
+    InstructorAct::Refresh.execute(&mut context)
 }

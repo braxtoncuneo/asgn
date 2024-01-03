@@ -8,6 +8,7 @@ use std::{
     fmt::{self, Write as _},
     os::unix::fs::PermissionsExt,
     any::type_name,
+    str::FromStr,
 };
 
 use crate::error::Error;
@@ -286,6 +287,12 @@ impl ChronoDateTimeExt for chrono::DateTime<chrono::Local> {
 
         toml::value::Datetime { date, time, offset: None }
     }
+}
+
+pub fn parse_toml_date_as_chrono(date: &str) -> Result<chrono::DateTime<chrono::Local>, Error> {
+    toml::value::Datetime::from_str(date).ok()
+        .and_then(|toml_date| toml_date.try_into_chrono_date_time())
+        .ok_or_else(|| Error::invalid_date(date))
 }
 
 pub fn parse_toml_file<T: serde::de::DeserializeOwned>(path: impl AsRef<Path>) -> Result<T, Error> {
