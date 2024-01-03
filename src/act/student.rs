@@ -7,7 +7,7 @@ use std::{fs, path::{Path, PathBuf}, str::FromStr, fmt};
 use crate::{
     asgn_spec::{AsgnSpec, Ruleset, StatBlockSet, SubmissionFatal},
     context::{Context, Role},
-    error::{Error, ErrorLog},
+    error::{Error, ErrorLog, InactiveKind, FilePresenceErrorKind, CONTACT_INSTRUCTOR},
     util::{self, color::{FG_GREEN, STYLE_RESET, FG_YELLOW}},
     table::Table,
 };
@@ -95,47 +95,53 @@ pub enum StudentAct {
 #[allow(dead_code)]
 impl StudentAct {
     fn copy_dir(dst_dir: impl AsRef<Path>, src_dir: impl AsRef<Path>) -> Result<(), Error> {
-        fs::create_dir_all(&dst_dir).map_err(|err|
-            Error::IOFail(err.to_string())
+        fs::create_dir_all(dst_dir.as_ref()).map_err(|err|
+            Error::io("Failed to create dir", &dst_dir, err)
         )?;
 
-        let dir_iter = fs::read_dir(src_dir).map_err(|err|
-            Error::IOFail(err.to_string())
+        let dir_iter = fs::read_dir(&src_dir).map_err(|err|
+            Error::io("Failed to read dir", &src_dir, err)
         )?;
 
         for entry in dir_iter {
             let entry = entry.map_err(|err|
-                Error::IOFail(err.to_string())
+                Error::io("Failed to read dir entry", &src_dir, err)
             )?;
             let ty = entry.file_type().map_err(|err|
-                Error::IOFail(err.to_string())
+                Error::io("Failed to get filetype", entry.path(), err)
             )?;
 
             if ty.is_dir() {
-                StudentAct::copy_dir(dst_dir.as_ref().join(entry.file_name()), entry.path())?;
+                StudentAct::copy_dir(
+                    dst_dir.as_ref().join(entry.file_name()),
+                    entry.path(),
+                )?;
             } else {
-                fs::copy(entry.path(), dst_dir.as_ref()
-                    .join(entry.file_name()))
-                    .map_err(|err| Error::IOFail(err.to_string()))?;
+                fs::copy(
+                    entry.path(),
+                    dst_dir.as_ref().join(entry.file_name()),
+                ).map_err(|err|
+                    Error::io("Failed to copy file", entry.path(), err)
+                )?;
             }
         }
 
         Ok(())
     }
 
-    pub fn verify_active(spec: &AsgnSpec, context: &Context) -> Result<(), Error> {
+    pub fn verify_active(spec: &AsgnSpec, context: &Context) -> Result<(), InactiveKind> {
         let is_instructor : bool = context.role != Role::Instructor;
 
         if !spec.active {
-            return Err(Error::Inactive);
+            return Err(InactiveKind::Inactive);
         }
 
         if !is_instructor && spec.before_open() {
-            return Err(Error::BeforeOpen);
+            return Err(InactiveKind::BeforeOpen);
         }
 
         if !is_instructor && spec.after_close() {
-            return Err(Error::AfterClose);
+            return Err(InactiveKind::AfterClose);
         }
 
         Ok(())
@@ -143,10 +149,12 @@ impl StudentAct {
 
     pub fn grace(asgn_name: &str, username: &str, ext_days: i64, context: &Context) -> Result<(), Error> {
         if context.grace_total.is_none() {
-            return Err(Error::NoGrace);
-        } else if let Some(num) = context.grace_limit.as_ref() {
+            return Err(Error::grace_not_in_course());
+        }
+
+        if let Some(num) = &context.grace_limit {
             if *num < ext_days {
-                return Err(Error::GraceLimit);
+                return Err(Error::grace_limit());
             }
         }
 
@@ -158,8 +166,8 @@ impl StudentAct {
         let current_grace = slot.get_grace()?;
 
         if let Some(num) = context.grace_total.as_ref() {
-            if *num < (context.grace_spent() - current_grace + ext_days){
-                return Err(Error::NotEnoughGrace);
+            if *num < (context.grace_spent() - current_grace + ext_days) {
+                return Err(Error::grace_insufficient());
             }
         }
 
@@ -172,12 +180,15 @@ impl StudentAct {
         <T as FromStr>::Err: fmt::Display,
     {
         let path = asgn.path.join(".info").join("ranking").join(student_name).join(score_name);
-        let text = fs::read_to_string(path).map_err(|err|
-            Error::IOFail(err.to_string())
+        let text = fs::read_to_string(&path).map_err(|err|
+            Error::io("Failed to read score file", path, err)
         )?;
 
         T::from_str(&text).map_err(|err|
-            Error::IOFail(format!("Failed to parse score {score_name} for student {student_name}: {err}"))
+            Error::custom(
+                format!("Failed to parse score {score_name} for student {student_name}: {err}"),
+                "Please contact the instructor.",
+            )
         )
     }
 
@@ -201,7 +212,7 @@ impl StudentAct {
         let mut rows: Vec<(Option<T>, Vec<String>)> = Vec::new();
 
         let base_path = asgn.path.join(".info").join("score.toml");
-        let scores = util::parse_from::<StatBlockSet>(&base_path)?;
+        let scores: StatBlockSet = util::parse_from(&base_path)?;
 
         for member in &context.members {
             let mut row = vec![member.clone()];
@@ -215,7 +226,10 @@ impl StudentAct {
             let score: Option<T> = stat_block.scores.get(rule_name)
                 .map(|toml_val|
                     T::from_str(&toml_val.to_string()).map_err(|err|
-                        Error::IOFail(format!("Failed to parse score {rule_name} for user {member}: {err}"))
+                        Error::custom(
+                            format!("Failed to parse score {rule_name} for user {member}: {err}"),
+                            CONTACT_INSTRUCTOR,
+                        )
                     )
                 )
                 .transpose()?;
@@ -251,37 +265,37 @@ impl StudentAct {
         let spec = context.catalog_get(asgn_name)?;
 
         let Some(ruleset) = spec.score.as_ref() else {
-            return Err(Error::Custom(
-                format!("Assignment '{}' has no scores to rank.", asgn_name),
-                "If you believe this assignment should have scores, contact the instructor.".to_owned()
+            return Err(Error::custom(
+                format!("Assignment '{asgn_name}' has no scores to rank."),
+                "If you believe this assignment should have scores, contact the instructor."
             ));
         };
 
         let kind = ruleset.rules.iter()
             .find(|rule| rule.target == rule_name)
             .map(|r| r.kind.clone())
-            .ok_or(Error::Custom(
+            .ok_or(Error::custom(
                 format!("Assignment '{asgn_name}' does not have a '{rule_name}' score."),
-                "If you believe this assignment should have this score, contact the instructor.".to_owned()
+                "If you believe this assignment should have this score, contact the instructor."
             ))?;
 
 
         let Some(kind) = kind else {
-            return Err(Error::IOFail("No score kind given.".to_owned()));
+            return Err(Error::custom("No score kind given.", "Please provide a score kind."));
         };
 
         match kind.as_str() {
             "bool"  => Self::rank_specialized::<bool>(spec, ruleset, rule_name, up, context),
             "int"   => Self::rank_specialized::<i64 >(spec, ruleset, rule_name, up, context),
             "float" => Self::rank_specialized::<f64 >(spec, ruleset, rule_name, up, context),
-            _       => Err(Error::IOFail("Invalid score kind.".to_owned()))
+            _       => Err(Error::custom("Invalid score kind.", "Please provide a score kind."))
         }
     }
 
     fn submit(asgn_name: &str, context: &Context) -> Result<(), ErrorLog> {
         let spec = context.catalog_get(asgn_name)?;
 
-        Self::verify_active(spec, context)?;
+        Self::verify_active(spec, context).map_err(Error::from)?;
 
         let sub_dir = context.base_path.join(asgn_name).join(&context.username);
 
@@ -291,23 +305,13 @@ impl StudentAct {
             let src_path = src_dir.join(file_name);
             let dst_path = sub_dir.join(file_name);
 
-            if !src_path.exists() {
-                log.push(Error::MissingFile(file_name.clone()));
+            if let Err(err) = FilePresenceErrorKind::assert_file(&src_path) {
+                log.push(err.at(src_path));
                 continue;
             }
-            if src_path.is_dir() {
-                log.push(Error::FileIsDir(file_name.clone()));
-                continue;
-            }
-            if !src_path.is_file() {
-                log.push(Error::FileIsOther(file_name.clone()));
-                continue;
-            }
+
             fs::copy(&src_path, &dst_path).map_err(|err|
-                Error::IOFail(format!(
-                    "could not copy file {} to {}: {}",
-                    src_path.display(), dst_path.display(), err
-                ))
+                Error::io("Failed to copy file", src_path, err)
             )?;
             util::set_mode(&dst_path, 0o777)?;
         }
@@ -364,7 +368,7 @@ impl StudentAct {
             .join("setup");
 
         if !setup_dir.exists() {
-            return Err(Error::NoSetup(asgn_name.to_owned()));
+            return Err(Error::no_setup(asgn_name));
         }
 
         let dst_dir = util::make_fresh_dir(&context.cwd, &format!("{asgn_name}_setup"));
@@ -375,29 +379,26 @@ impl StudentAct {
     fn recover(asgn_name: &str, context: &Context) -> Result<(), ErrorLog> {
         let spec = context.catalog_get(asgn_name)?;
 
-        Self::verify_active(spec, context)?;
+        Self::verify_active(spec, context).map_err(Error::from)?;
 
         let sub_dir = context.base_path.join(asgn_name).join(&context.username);
         let dst_dir = util::make_fresh_dir(&context.cwd, &format!("{asgn_name}_recovery"));
 
         fs::create_dir_all(&dst_dir).map_err(|err|
-            Error::IOFail(err.to_string())
+            Error::io("Failed to create dir", &dst_dir, err)
         )?;
 
         let mut log: ErrorLog = Default::default();
         for file_name in &spec.file_list {
             let src_path = sub_dir.join(file_name);
             if !src_path.exists() {
-                log.push(Error::MissingSub(file_name.clone()));
+                log.push(FilePresenceErrorKind::NotFound.at(file_name));
                 continue;
             }
             let dst_path = dst_dir.join(file_name);
 
             fs::copy(&src_path, &dst_path).map_err(|err|
-                Error::IOFail(format!(
-                    "could not copy file {} to {}: {}",
-                    src_path.display(), dst_path.display(), err)
-                )
+                Error::io("Failed to copy file", src_path, err)
             )?;
         }
         log.into_result()
@@ -424,8 +425,8 @@ To import it for this shell session, run the command:
     fn details(asgn_name: &str, context: &Context) -> Result<(), Error> {
         let spec = context.catalog_get(asgn_name)?;
 
-        if ! spec.visible {
-            return Err(Error::InvalidAsgn(asgn_name.to_owned()));
+        if !spec.visible {
+            return Err(Error::invalid_asgn(asgn_name));
         }
 
         print!("{}", spec.details(context)?);

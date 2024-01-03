@@ -8,7 +8,7 @@ pub struct Error;
 
 impl From<Error> for error::Error {
     fn from(_: Error) -> Self {
-        error::Error::TableError
+        error::Error::table_error()
     }
 }
 

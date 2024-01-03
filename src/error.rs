@@ -1,115 +1,266 @@
-use std::{fmt, path::PathBuf};
+use std::{fmt, path::Path, io};
+
 use crate::util::color::{FG_RED, FG_YELLOW, STYLE_RESET};
 
-#[derive(Debug, Clone)]
-pub enum Error {
-    NoBaseDir(PathBuf),
-    LocalBuildFail(String),
-    DestBuildFail(String),
-    FormatFail(String),
-    StyleFail(String),
-    TestFail(String),
-    TableError,
-    NoSpec(String, String),
-    BadSpec(String, String),
-    IOFail(String),
-    InvalidUID(u32),
-    InvalidCWD(),
-    InvalidAsgn(String),
-    InvalidUser(String),
-    MissingFile(String),
-    MissingSub(String),
-    FileIsDir(String),
-    FileIsOther(String),
-    NoSetup(String),
-    NoSuchMember(String),
-    Unauthorized,
-    BeforeOpen,
-    AfterClose,
-    Inactive,
-    NoGrace,
-    NotEnoughGrace,
-    GraceLimit,
-    Custom(String, String),
+pub const CONTACT_INSTRUCTOR: &str = "Please contact the instructor.";
+pub const MAYBE_CONTACT_INSTRUCTOR: &str =
+    "If you believe this is an error in the course configuration, contact the instructor.";
+pub const VALID_DATE: &str = "Please enter a valid date";
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FilePresenceErrorKind {
+    NotFound, FileIsDir, FileIsOther,
+}
+
+impl FilePresenceErrorKind {
+    pub fn description(&self) -> &'static str {
+        use FilePresenceErrorKind::*;
+        match self {
+            NotFound => "File not found",
+            FileIsDir => "File is actually a directory",
+            FileIsOther => "File is neither a normal file nor a directory",
+        }
+    }
+
+    pub fn advice(&self) -> &'static str {
+        use FilePresenceErrorKind::*;
+        match self {
+            NotFound => "Please ensure that the file exists",
+            FileIsDir => "Please ensure that the file is not a directory",
+            FileIsOther => "Please ensure that the file is actually a file",
+        }
+    }
+
+    pub fn assert_file(path: &Path) -> Result<(), Self> {
+        use FilePresenceErrorKind::*;
+        if !path.exists() { Err(NotFound) }
+        else if path.is_dir() { Err(FileIsDir) }
+        else if !path.is_file() { Err(FileIsOther) }
+        else { Ok(()) }
+    }
+
+    pub fn at(self, path: impl AsRef<Path>) -> Error {
+        Error::file_presence(path, self)
+    }
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum InactiveKind {
+    BeforeOpen, AfterClose, Inactive
+}
+
+impl InactiveKind {
+    pub fn description(&self) -> &'static str {
+        use InactiveKind::*;
+        match self {
+            BeforeOpen => "Assignments cannot be interacted with before their open date.",
+            AfterClose => "Assignments cannot be interacted with after their close date.",
+            Inactive   => "Interaction with this assignment is currently disabled.",
+        }
+    }
+}
+
+impl From<InactiveKind> for Error {
+    fn from(kind: InactiveKind) -> Self { Self::inactive(kind) }
+}
+
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Error {
+    description: String,
+    advice: String
+}
+
+impl Error {
+    fn new(description: impl ToString, advice: impl ToString) -> Self {
+        Self {
+            description: description.to_string(),
+            advice: advice.to_string(),
+        }
+    }
+
+    pub fn invalid_cwd(err: io::Error) -> Self {
+        Self::new(
+            format!("Failed to access Current Working Directory: {err}"),
+            "Please change to a valid directory.",
+        )
+    }
+
+    pub fn invalid_uid(uid: u32) -> Self {
+        Self::new(
+            format!("UID {uid} is invalid."),
+            CONTACT_INSTRUCTOR,
+        )
+    }
+
+    pub fn invalid_user(username: &str) -> Self {
+        Self::new(
+            format!("User{STYLE_RESET} '{username}' {FG_RED}is invalid."),
+            MAYBE_CONTACT_INSTRUCTOR,
+        )
+    }
+
+    pub fn no_home_dir() -> Self {
+        Self::new(
+            "Unable to determine home directory location.",
+            MAYBE_CONTACT_INSTRUCTOR,
+        )
+    }
+
+    pub fn no_base_dir(path: impl AsRef<Path>) -> Self {
+        Self::new(
+            format!("Base submission directory for course{STYLE_RESET} '{}' {FG_RED}does not exist.", path.as_ref().display()),
+            CONTACT_INSTRUCTOR,
+        )
+    }
+
+    pub fn spec_io(path: impl AsRef<Path>, err: io::Error) -> Self {
+        Self::new(
+            format!("Specification file at{STYLE_RESET} {} {FG_RED}could not be read, IO Error:{STYLE_RESET} {err}", path.as_ref().display()),
+            CONTACT_INSTRUCTOR,
+        )
+    }
+
+    pub fn bad_spec(path: impl AsRef<Path>, desc: &str) -> Self {
+        Self::new(
+            format!("Specification file at{STYLE_RESET} {} {FG_RED}is malformed:{STYLE_RESET} {desc}", path.as_ref().display()),
+            CONTACT_INSTRUCTOR,
+        )
+    }
+
+    pub fn bad_stats(username: &str, desc: &str) -> Self {
+        Self::new(
+            format!("Stat block for{STYLE_RESET} {username} {FG_RED}is malformed:{STYLE_RESET} {desc}"),
+            CONTACT_INSTRUCTOR,
+        )
+    }
+
+    pub fn io(desc: &str, path: impl AsRef<Path>, err: io::Error) -> Self {
+        Self::new(
+            format!("{desc} at {}:{STYLE_RESET} {err}", path.as_ref().display()),
+            MAYBE_CONTACT_INSTRUCTOR,
+        )
+    }
+
+    pub fn command(cmd: &str, err: io::Error) -> Self {
+        Self::new(
+            format!("Failed to run command {STYLE_RESET}{cmd}{FG_RED}:{STYLE_RESET} {err}"),
+            CONTACT_INSTRUCTOR,
+        )
+    }
+
+    pub fn subprocess(desc: &str, err: String) -> Self {
+        Self::new(
+            format!("Subprocess {desc} failed:{STYLE_RESET} {err}"),
+            CONTACT_INSTRUCTOR,
+        )
+    }
+
+    pub fn invalid_date(date: &str) -> Self {
+        Self::new(
+            format!("Invalid date:{STYLE_RESET} {date:?}"),
+            VALID_DATE,
+        )
+    }
+
+    pub fn date_out_of_range(date: chrono::DateTime<chrono::Local>) -> Self {
+        Self::new(
+            format!("Date out of range:{STYLE_RESET} {date}"),
+            VALID_DATE,
+        )
+    }
+
+    pub fn invalid_toml(path: impl AsRef<Path>, err: toml::de::Error) -> Self {
+        Self::new(
+            format!("Invalid toml in {STYLE_RESET} {}{FG_RED}:{STYLE_RESET}\n{err}", path.as_ref().display()),
+            CONTACT_INSTRUCTOR,
+        )
+    }
+
+    pub fn toml_ser(desc: &'static str, err: toml::ser::Error) -> Self {
+        Self::new(
+            format!("Failed to serialize toml for {desc}:{STYLE_RESET} {err}"),
+            CONTACT_INSTRUCTOR,
+        )
+    }
+
+    pub fn invalid_asgn(name: &str) -> Self {
+        Self::new(
+            format!("Assignment{STYLE_RESET} '{name}' {FG_RED}is invalid or non-existant."),
+            MAYBE_CONTACT_INSTRUCTOR,
+        )
+    }
+
+    pub fn file_presence(path: impl AsRef<Path>, kind: FilePresenceErrorKind) -> Self {
+        Self::new(
+            format!("{}:{STYLE_RESET} {}", kind.description(), path.as_ref().display()),
+            kind.advice(),
+        )
+    }
+
+    pub fn no_setup(name: &str) -> Self {
+        Self::new(
+            format!("Setup files are not available for assignment{STYLE_RESET} '{name}'{FG_RED}."),
+            MAYBE_CONTACT_INSTRUCTOR,
+        )
+    }
+
+    pub fn no_such_member(name: &str) -> Self {
+        Self::new(
+            format!("User{STYLE_RESET} '{name}' {FG_RED} is not a member of this course."),
+            MAYBE_CONTACT_INSTRUCTOR,
+        )
+    }
+
+    pub fn table_error() -> Self {
+        Self::new(
+            "Failure while constructing output table.",
+            CONTACT_INSTRUCTOR,
+        )
+    }
+
+    pub fn inactive(kind: InactiveKind) -> Self {
+        Self::new(
+            kind.description(),
+            MAYBE_CONTACT_INSTRUCTOR,
+        )
+    }
+
+    pub fn grace_not_in_course() -> Self {
+        Self::new(
+            "This course does not provide grace days.",
+            "Assignments should be turned in on-time for full credit.",
+        )
+    }
+
+    pub fn grace_insufficient() -> Self {
+        Self::new(
+            "There aren't enough free grace days to provide such an extension.",
+            "To increase the number of available grace days, remove grace days from other assignments.",
+        )
+    }
+
+    pub fn grace_limit() -> Self {
+        Self::new(
+            "The number of grace days requested exceeds the per-assignment grace day limit.",
+            "Assignments should be turned in before the grace day limit for full credit.",
+        )
+    }
+
+    pub fn custom(description: impl ToString, advice: impl ToString) -> Self {
+        Self::new(description, advice)
+    }
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use Error::*;
-
-        write!(f, "{FG_RED}! ")?;
-        match self {
-            NoBaseDir(dir)      => write!(f, "Base submission directory for course{STYLE_RESET} '{}' {FG_RED}does not exist.", dir.display()),
-            NoSpec(name, desc)  => write!(f, "Specification file for{STYLE_RESET} {name} {FG_RED}could not be read, IO Error:{STYLE_RESET} {desc}"),
-            BadSpec(name, desc) => write!(f, "Specification file for{STYLE_RESET} {name} {FG_RED}is malformed:{STYLE_RESET} {desc}"),
-            IOFail(desc)        => write!(f, "IO Failure:{STYLE_RESET} {desc}"),
-            InvalidAsgn(name)   => write!(f, "Assignment{STYLE_RESET} '{name}' {FG_RED}is invalid or non-existant."),
-            InvalidUser(name)   => write!(f, "User{STYLE_RESET} '{name}' {FG_RED}is invalid."),
-            InvalidCWD()        => write!(f, "Failed to access Current Working Directory."),
-            InvalidUID(uid)     => write!(f, "UID {uid} is invalid."),
-            LocalBuildFail(err) => write!(f, "\n\nBuild failure in current working directory:{STYLE_RESET} {err}"),
-            DestBuildFail(err)  => write!(f, "\n\nBuild failure in submission directory:{STYLE_RESET} {err}"),
-            FormatFail(err)     => write!(f, "\n\nFailed to format files:{STYLE_RESET} {err}"),
-            StyleFail(err)      => write!(f, "\n\nFailed to check style:{STYLE_RESET} {err}"),
-            TestFail(err)       => write!(f, "\n\nFailed to test functionality due to internal error:{STYLE_RESET} {err}"),
-            MissingFile(name)   => write!(f, "File{STYLE_RESET} '{name}' {FG_RED}does not exist in current working directory."),
-            MissingSub(name)    => write!(f, "File{STYLE_RESET} '{name}' {FG_RED}does not exist in the submission directory."),
-            FileIsDir(name)     => write!(f, "File{STYLE_RESET} '{name}' {FG_RED}is actually a directory."),
-            FileIsOther(name)   => write!(f, "File{STYLE_RESET} '{name}' {FG_RED}in neither a file nor a directory."),
-            NoSetup(name)       => write!(f, "Setup files are not available for assignment{STYLE_RESET} '{name}'{FG_RED}."),
-            NoSuchMember(name)  => write!(f, "User{STYLE_RESET} '{name}' {FG_RED} is not a member of this course."),
-            TableError          => write!(f, "Failure while constructing output table."),
-            Unauthorized        => write!(f, "You are not authorized to perform this action."),
-            BeforeOpen          => write!(f, "Assignments cannot be interacted with before their open date."),
-            AfterClose          => write!(f, "Assignments cannot be interacted with after their close date."),
-            Inactive            => write!(f, "Interaction with this assignment is currently disabled."),
-            NoGrace             => write!(f, "This course does not provide grace days."),
-            NotEnoughGrace      => write!(f, "There aren't enough free grace days to provide such an extension."),
-            GraceLimit          => write!(f, "The number of grace days requested exceeds the per-assignment grace day limit."),
-            Custom(text, _)     => f.write_str(text),
-        }?;
-
-        write!(f, "\n{FG_YELLOW}> ")?;
-        match self {
-            NoBaseDir(_)
-            | NoSpec(_, _)
-            | BadSpec(_, _)
-            | IOFail(_)
-            | InvalidUID(_)
-            | TestFail(_)
-            | TableError
-            | Unauthorized => write!(f, "Please contact the instructor."),
-
-            InvalidAsgn(_)
-            | InvalidUser(_)
-            | NoSetup(_)
-            | NoSuchMember(_)
-            | BeforeOpen
-            | AfterClose
-            | Inactive => write!(f, "If this is an error, please contact the instructor."),
-
-            LocalBuildFail(_)
-            | FormatFail(_)
-            | StyleFail(_) => write!(f, "Please fix the required errors."),
-
-            MissingFile(name)
-            | FileIsDir(name)
-            | FileIsOther(name) => write!(f, "Please ensure that{STYLE_RESET} '{name}' {FG_YELLOW}is a file."),
-
-            InvalidCWD()     => write!(f, "Please change to a valid directory."),
-            DestBuildFail(_) => write!(f, "Please ensure that only the files listed by the assignment are necessary for compilation."),
-            MissingSub(name) => write!(f, "File{STYLE_RESET} '{name}' {FG_YELLOW}cannot be recovered."),
-            NoGrace          => write!(f, "Assignments should be turned in on-time for full credit."),
-            NotEnoughGrace   => write!(f, "To increase the number of available grace days, remove grace days from other assignments."),
-            GraceLimit       => write!(f, "Assignments should be turned in before the grace day limit for full credit."),
-            Custom(_, text)  => f.write_str(text)
-        }?;
-
-        write!(f, "{STYLE_RESET}")
+        write!(f, "{FG_RED}! {}\n{FG_YELLOW}> {}{STYLE_RESET}", self.description, self.advice)
     }
 }
 
-#[derive(Default, Clone, Debug)]
+
+#[derive(Default, Clone, Debug, PartialEq)]
 pub struct ErrorLog(Vec<Error>);
 
 impl ErrorLog {
@@ -121,12 +272,8 @@ impl ErrorLog {
         self.0.push(info);
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
     pub fn into_result<T: Default>(self) -> Result<T, Self> {
-        self.is_empty()
+        self.0.is_empty()
             .then(T::default)
             .ok_or(self)
     }
