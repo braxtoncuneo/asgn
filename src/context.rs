@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf}, iter
 };
 
-use chrono::{TimeZone, DateTime, Local, Days, NaiveTime};
+use chrono::{TimeZone, DateTime, Local, Days, NaiveTime, Timelike};
 use users::{ get_user_by_uid, get_current_uid};
 use serde_derive::{ Serialize, Deserialize};
 use itertools::Itertools;
@@ -432,8 +432,8 @@ impl Context {
         let naive_due_date = due_date.map(|due| {
             let date = due.date_naive();
             match due.time() {
-                DEFAULT_DUE_TIME => due.to_string(),
-                time => format!("{date} {time}"),
+                DEFAULT_DUE_TIME => date.to_string(),
+                time => format!("{date} {}",time.hour()),
             }
         });
 

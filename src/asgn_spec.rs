@@ -688,7 +688,7 @@ impl SubmissionStatus {
         if late_by.num_seconds() > 0 {
             format!("Late {days}d {hours}h {mins}m")
         } else {
-            format!("Early -{days}d -{hours}h -{mins}m")
+            format!("Early {days}d {hours}h {mins}m")
         }
     }
 }
