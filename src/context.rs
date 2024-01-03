@@ -433,7 +433,7 @@ impl Context {
             let date = due.date_naive();
             match due.time() {
                 DEFAULT_DUE_TIME => date.to_string(),
-                time => format!("{date} {}",time.hour()),
+                time => format!("{date} {time}"),
             }
         });
 
