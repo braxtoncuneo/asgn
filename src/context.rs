@@ -430,7 +430,7 @@ impl Context {
         let naive_due_date = due_date.map(|due| {
             let date = due.date_naive();
             match due.time() {
-                util::DEFAULT_DUE_TIME => due.to_string(),
+                util::DEFAULT_DUE_TIME => date.to_string(),
                 time => format!("{date} {time}"),
             }
         });
