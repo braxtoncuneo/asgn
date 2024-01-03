@@ -115,13 +115,6 @@ impl Error {
         )
     }
 
-    pub fn spec_io(path: impl AsRef<Path>, err: io::Error) -> Self {
-        Self::new(
-            format!("Specification file at{STYLE_RESET} {} {FG_RED}could not be read, IO Error:{STYLE_RESET} {err}", path.as_ref().display()),
-            CONTACT_INSTRUCTOR,
-        )
-    }
-
     pub fn bad_spec(path: impl AsRef<Path>, desc: &str) -> Self {
         Self::new(
             format!("Specification file at{STYLE_RESET} {} {FG_RED}is malformed:{STYLE_RESET} {desc}", path.as_ref().display()),
@@ -173,14 +166,14 @@ impl Error {
 
     pub fn invalid_toml(path: impl AsRef<Path>, err: toml::de::Error) -> Self {
         Self::new(
-            format!("Invalid toml in {STYLE_RESET} {}{FG_RED}:{STYLE_RESET}\n{err}", path.as_ref().display()),
+            format!("Invalid TOML in {STYLE_RESET} {}{FG_RED}:{STYLE_RESET}\n{err}", path.as_ref().display()),
             CONTACT_INSTRUCTOR,
         )
     }
 
     pub fn toml_ser(desc: &'static str, err: toml::ser::Error) -> Self {
         Self::new(
-            format!("Failed to serialize toml for {desc}:{STYLE_RESET} {err}"),
+            format!("Failed to serialize TOML for {desc}:{STYLE_RESET} {err}"),
             CONTACT_INSTRUCTOR,
         )
     }

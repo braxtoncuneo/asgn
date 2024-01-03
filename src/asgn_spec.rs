@@ -3,7 +3,6 @@ use std::{
     path::{PathBuf, Path},
     process::Stdio,
     os::unix::fs::MetadataExt,
-    io,
 };
 
 use itertools::Itertools;
@@ -194,13 +193,7 @@ impl AsgnSpec {
         let spec_path = path.join(".info");
         let info_path = spec_path.join("info.toml");
 
-        let info_text = fs::read_to_string(&info_path).map_err(|err|
-            Error::spec_io(info_path.clone(), err)
-        )?;
-
-        let spec_toml: AsgnSpecToml = toml::from_str(&info_text).map_err(|err|
-            Error::invalid_toml(info_path.clone(), err)
-        )?;
+        let spec_toml: AsgnSpecToml = util::parse_toml_file(info_path)?;
 
         let spec = Self::from_toml(path.to_owned(), spec_toml)?;
 
@@ -212,15 +205,9 @@ impl AsgnSpec {
     }
 
     pub fn sync(&self) -> Result<(), Error>{
-        let spec_toml = AsgnSpecToml::from(self);
-
-        let toml_text = toml::to_string(&spec_toml).map_err(|err|
-            Error::toml_ser("AssignSpecToml", err)
-        )?;
-
-        let path = self.path.join(".info").join("info.toml");
-        fs::write(&path, toml_text).map_err(|err|
-            Error::io("Failed to write spec file", path, err)
+        util::write_toml_file(
+            &AsgnSpecToml::from(self),
+            self.path.join(".info").join("info.toml"),
         )
     }
 
@@ -559,30 +546,17 @@ impl<'ctx> SubmissionSlot<'ctx> {
 
     pub fn get_grace(&self) -> Result<i64, Error> {
         let path = self.grace_path();
-        let toml_text = match fs::read_to_string(&path) {
-            Ok(toml_text) => toml_text,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(0),
-            Err(err) => return Err(Error::io("Failed to read grace file", path, err)),
-        };
+        if !path.exists() {
+            return Ok(0);
+        }
 
-        let grace: GraceToml = toml::from_str(&toml_text).map_err(|err|
-            Error::invalid_toml(path, err)
-        )?;
+        let grace: GraceToml = util::parse_toml_file(path)?;
 
         Ok(grace.value)
     }
 
     pub fn set_grace(&self, value: i64) -> Result<(), Error> {
-        let grace_toml = GraceToml { value };
-        let grace_path = self.grace_path();
-        let toml_text = toml::to_string(&grace_toml).map_err(|err|
-            Error::toml_ser("GraceToml", err)
-        )?;
-        fs::write(self.grace_path(), toml_text).map_err(|err|
-            Error::io("Failed to write grace file", &grace_path, err)
-        )?;
-
-        Ok(())
+        util::write_toml_file(&GraceToml { value }, self.grace_path())
     }
 
     pub fn get_extension(&self) -> Result<i64, Error> {
@@ -605,27 +579,13 @@ impl<'ctx> SubmissionSlot<'ctx> {
             return Err(Error::file_presence(&ext_path, FilePresenceErrorKind::NotFound));
         }
 
-        let toml_text = fs::read_to_string(&ext_path).map_err(|err|
-            Error::io("Failed to read extension file", &ext_path, err)
-        )?;
-
-        let ext: ExtensionToml = toml::from_str(&toml_text).map_err(|err|
-            Error::invalid_toml(&ext_path, err)
-        )?;
+        let ext: ExtensionToml = util::parse_toml_file(ext_path)?;
 
         Ok(ext.value)
     }
 
     pub fn set_extension(&self, value: i64) -> Result<(), Error> {
-        let ext_toml = ExtensionToml { value };
-        let ext_path = self.extension_path();
-        let toml_text = toml::to_string(&ext_toml).map_err(|err|
-            Error::toml_ser("ExtensionToml", err)
-        )?;
-        fs::write(&ext_path, toml_text).map_err(|err|
-            Error::io("Failed to write extension file", ext_path, err)
-        )?;
-        Ok(())
+        util::write_toml_file(&ExtensionToml { value }, self.extension_path())
     }
 
     pub fn status(&self) -> Result<SubmissionStatus, Error> {

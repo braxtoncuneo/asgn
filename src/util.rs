@@ -8,6 +8,7 @@ use std::{
     process::{Command, ExitStatus, Stdio},
     fmt::{self, Write as _},
     os::unix::fs::PermissionsExt,
+    any::type_name,
 };
 
 use crate::error::Error;
@@ -289,12 +290,22 @@ impl ChronoDateTimeExt for chrono::DateTime<chrono::Local> {
     }
 }
 
-pub fn parse_from<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Error> {
-    let text = fs::read_to_string(path).map_err(|err|
-        Error::io("Failed to read file", path, err)
+pub fn parse_toml_file<T: serde::de::DeserializeOwned>(path: impl AsRef<Path>) -> Result<T, Error> {
+    let text = fs::read_to_string(&path).map_err(|err|
+        Error::io("Failed to read TOML file", &path, err)
     )?;
 
     toml::from_str(&text).map_err(|err|
         Error::invalid_toml(path, err)
+    )
+}
+
+pub fn write_toml_file<T: serde::ser::Serialize>(value: &T, path: impl AsRef<Path>) -> Result<(), Error> {
+    let toml_text = toml::to_string(value).map_err(|err|
+        Error::toml_ser(type_name::<T>(), err)
+    )?;
+
+    fs::write(&path, toml_text).map_err(|err|
+        Error::io("Failed to write TOML file", path, err)
     )
 }

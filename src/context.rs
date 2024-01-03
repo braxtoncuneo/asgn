@@ -4,7 +4,8 @@ use std::{
     env::current_dir,
     fs,
     os::unix::fs::{PermissionsExt, MetadataExt},
-    path::{Path, PathBuf}, iter
+    path::{Path, PathBuf},
+    iter
 };
 
 use chrono::{TimeZone, DateTime, Local, Days};
@@ -79,28 +80,13 @@ pub struct Context {
 #[allow(dead_code)]
 impl Context {
     fn load(base_path: &Path) -> Result<CourseToml, Error> {
-        let course_file_path = base_path.join(".info").join("course.toml");
-
-        let course_file_text = fs::read_to_string(&course_file_path).map_err(|err|
-            Error::spec_io(&course_file_path, err)
-        )?;
-
-        toml::from_str(&course_file_text).map_err(|err|
-            Error::invalid_toml(course_file_path, err)
-        )
+        util::parse_toml_file(base_path.join(".info").join("course.toml"))
     }
 
     pub fn sync(&self) -> Result<(), Error> {
-        let course_file_path = self.base_path.join(".info").join("course.toml");
-
-        let course_toml = CourseToml::from(self);
-
-        let toml_text = toml::to_string(&course_toml).map_err(|err|
-            Error::toml_ser("CourseToml", err)
-        )?;
-
-        fs::write(&course_file_path, toml_text).map_err(|err|
-            Error::io("Failed writing course file", course_file_path, err)
+        util::write_toml_file(
+            &CourseToml::from(self),
+            self.base_path.join(".info").join("course.toml"),
         )
     }
 

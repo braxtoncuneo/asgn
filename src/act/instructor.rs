@@ -1,7 +1,6 @@
 use std::{
     str::FromStr,
     path::{Path, PathBuf},
-    fs,
 };
 
 use crate:: {
@@ -411,7 +410,7 @@ impl InstructorAct {
         )?;
 
         let stat_path = info_path.join("score.toml");
-        let old_stats: StatBlockSet = util::parse_from(&stat_path)?;
+        let old_stats: StatBlockSet = util::parse_toml_file(&stat_path)?;
 
         let mut new_stats: StatBlockSet = Default::default();
 
@@ -427,15 +426,7 @@ impl InstructorAct {
             }
         }
 
-        let toml_text = toml::to_string(&new_stats).map_err(|err|
-            Error::toml_ser("StatBlockSet", err)
-        )?;
-
-        fs::write(&stat_path, toml_text).map_err(|err|
-            Error::io("Failed to write stat block file", stat_path, err)
-        )?;
-
-        Ok(())
+        util::write_toml_file(&new_stats, stat_path)
     }
 
     fn update_all_scores(context: &mut Context) -> Result<(), ErrorLog> {

@@ -211,8 +211,7 @@ impl StudentAct {
 
         let mut rows: Vec<(Option<T>, Vec<String>)> = Vec::new();
 
-        let base_path = asgn.path.join(".info").join("score.toml");
-        let scores: StatBlockSet = util::parse_from(&base_path)?;
+        let scores: StatBlockSet = util::parse_toml_file(asgn.path.join(".info").join("score.toml"))?;
 
         for member in &context.members {
             let mut row = vec![member.clone()];
