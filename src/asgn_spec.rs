@@ -270,6 +270,10 @@ impl AsgnSpec {
             cmd.arg("--quiet");
         }
         cmd.arg(format!(
+            "CALLER_DIR={}",
+            context.cwd.clone().into_os_string().into_string().unwrap()
+        ));
+        cmd.arg(format!(
             "COURSE_PUBLIC={}",
             context.base_path.join(".info").join("public").display()
         ));
@@ -306,6 +310,7 @@ impl AsgnSpec {
         };
 
         let mut cmd = self.make_command(rule.target.as_ref(), quiet, context);
+        cmd.stdin(Stdio::inherit());
         cmd.stdout(Stdio::inherit());
         cmd.stderr(Stdio::inherit());
 
@@ -691,7 +696,7 @@ impl SubmissionStatus {
         if late_by.num_seconds() > 0 {
             format!("Late {days}d {hours}h {mins}m")
         } else {
-            format!("Early -{days}d -{hours}h -{mins}m")
+            format!("Early {days}d {hours}h {mins}m")
         }
     }
 }
