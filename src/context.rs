@@ -111,7 +111,9 @@ impl Context {
 
     pub fn deduce(base_path: impl AsRef<Path>) -> Result<Self, Error> {
         const PROC_SELF_EXE: &str = "/proc/self/exe";
-        let base_path = base_path.as_ref().canonicalize().unwrap();
+        let base_path = base_path.as_ref()
+            .canonicalize()
+            .map_err(|err| Error::io("When attempting to read course config ",base_path,err))?;
 
         let uid = get_current_uid();
         let username = get_user_by_uid(uid)
@@ -279,8 +281,10 @@ impl Context {
 
             util::refresh_dir(asgn_sub_path.clone(), 0o700, facl_list.iter())?;
 
+            let extension_path = asgn_sub_path.join(".grace");
+            util::refresh_file(extension_path, 0o777, "value = 0")?;
             let extension_path = asgn_sub_path.join(".extension");
-            util::refresh_file(extension_path, 0o700, "value = 0")?;
+            util::refresh_file(extension_path, 0o755, "value = 0")?;
         }
 
         Ok(())

@@ -30,7 +30,7 @@ fn main() {
                 if command == Some("init") {
                     print!("{}", Error::custom(
                         "Provided path is already the base path of a pre-existing, valid course directory.".to_owned(),
-                        "Either clear out that directory, or use a different one.".to_owned()
+                        "Either clear out that directory, or use a different one.\n".to_owned()
                     ));
                     return;
                 }
