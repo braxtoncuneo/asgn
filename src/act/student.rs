@@ -129,7 +129,7 @@ impl StudentAct {
     }
 
     pub fn verify_active(spec: &AsgnSpec, context: &Context) -> Result<(), InactiveKind> {
-        let is_instructor : bool = context.role != Role::Instructor;
+        let is_instructor : bool = context.role == Role::Instructor;
 
         if !spec.active {
             return Err(InactiveKind::Inactive);
